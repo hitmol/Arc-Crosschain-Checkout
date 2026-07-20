@@ -3,13 +3,27 @@
   "chainId": 5042002,
   "status": "pending-credentials",
   "deployer": null,
+  "treasury": null,
+  "usdc": "0x3600000000000000000000000000000000000000",
+  "protocolFeeBps": null,
+  "deploymentBlock": null,
   "contracts": {
     "MerchantRegistry": null,
     "CheckoutFactory": null,
     "PaymentVaultImplementation": null,
     "FeeManager": null
   },
-  "deploymentTransactions": {},
+  "deploymentTransactions": {
+    "MerchantRegistry": null,
+    "FeeManager": null,
+    "PaymentVaultImplementation": null,
+    "CheckoutFactory": null
+  },
   "deployedAt": null,
-  "commit": null
+  "commit": null,
+  "tag": null,
+  "sourceVerification": {
+    "status": "not-attempted",
+    "checkedAt": null
+  }
 }

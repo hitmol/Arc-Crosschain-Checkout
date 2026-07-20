@@ -1,24 +1,105 @@
 # Deployment
 
-## Contracts
+The repository is not deployed yet. `deployments/arc-testnet.json` remains `pending-credentials`; null fields are not deployment evidence.
 
-1. Obtain Arc Testnet USDC from the Circle faucet.
-2. Import the deployer into Foundry's encrypted keystore: `cast wallet import arc-checkout-deployer`.
-3. Set `ARC_RPC_URL`, `FOUNDRY_ACCOUNT`, `PROTOCOL_TREASURY`, and optionally `PROTOCOL_FEE_BPS`.
-4. Run `pnpm deploy:contracts` and confirm the broadcast in the wallet/keystore prompt.
-5. Verify every receipt on ArcScan and populate `deployments/arc-testnet.json` with real values only.
+## 1. Final Arc contracts
 
-Do not provide a private key in a command-line flag. The current repository is `pending-credentials` and has not been deployed.
+Deployment is intentionally gated on a clean, tagged release candidate, green CI, passing Foundry tests, an encrypted Foundry keystore account, and adequate Arc Testnet USDC gas balance.
 
-## Application
+Prepare locally without sharing secrets:
 
-Deploy `apps/web`, `apps/api`, `apps/worker`, and PostgreSQL as separate services. Run Prisma migrations before API/worker rollout. Set a base64-encoded 32-byte `WEBHOOK_ENCRYPTION_KEY` through the platform secret manager, configure `AUTH_DOMAIN` to the canonical frontend host, and allow credentials only from `NEXT_PUBLIC_APP_URL`. Configure the Arc registry/factory addresses and deployment block for the worker indexer. Expose `GET /health` on `WORKER_PORT` (default `4001`) and alert on database/RPC failure, a recorded indexer error, or increasing finalized-block lag. The worker settler key is optional and must be a dedicated low-value key stored only in the platform secret manager.
+```text
+cast wallet import arc-checkout-deployer
+git tag v0.1.0-hackathon-rc1
+git push origin v0.1.0-hackathon-rc1
+```
 
-## Checklist
+Set `ARC_RPC_URL`, `FOUNDRY_ACCOUNT`, `PROTOCOL_TREASURY`, and optionally `PROTOCOL_FEE_BPS`, `ARC_USDC_ADDRESS`, and `MIN_DEPLOYER_GAS_WEI` in the local shell or secret manager. Never pass a plaintext private key. Then run:
 
-- Contract receipts and source verification recorded.
-- CSP/security headers tested at the edge.
-- TLS, rate limits, request limits, backups, and monitoring enabled.
-- API, worker, and database health checks green.
-- Real Base Sepolia → Arc payment and webhook captured.
-- Rollback plan tested; contract deployments are immutable.
+```text
+pnpm deploy:preflight
+pnpm deploy:contracts
+pnpm verify:deployment -- --write
+```
+
+The cross-platform wrapper:
+
+- verifies Arc chain ID `5042002`;
+- requires the official Arc Testnet USDC `0x3600000000000000000000000000000000000000`, deployed bytecode, and `decimals() == 6`;
+- resolves the deployer only from `FOUNDRY_ACCOUNT` and rejects plaintext-key inputs;
+- validates treasury, fee bounds, and minimum native Arc USDC gas balance;
+- runs all Foundry tests before broadcasting;
+- parses Foundry receipts for all four deployments;
+- verifies bytecode, successful receipts, owners, treasury, protocol fee, and every CheckoutFactory constructor relationship;
+- atomically replaces `deployments/arc-testnet.json` only after all checks pass.
+
+ArcScan source verification is a separate best-effort operation. An ArcScan outage must not invalidate a successfully receipt-verified deployment, and the source-verification status must be recorded independently.
+
+## 2. Application topology
+
+Deploy four separate components:
+
+1. PostgreSQL 16+ with TLS, restricted network access, migrations, and backups.
+2. `apps/api` as a long-running Node service.
+3. `apps/worker` as a continuously running process, never as an ephemeral request-only function.
+4. `apps/web` on Vercel or an equivalent Next.js platform.
+
+Run `pnpm --filter @arc-checkout/database migrate:deploy` against the production database before rolling out API or worker.
+
+### Frontend environment
+
+```text
+NODE_ENV=production
+DEMO_MODE=false
+NEXT_PUBLIC_APP_URL=https://<frontend-host>
+NEXT_PUBLIC_API_URL=https://<api-host>
+NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
+NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<public project id>
+```
+
+### API environment
+
+```text
+NODE_ENV=production
+DEMO_MODE=false
+DATABASE_URL=<TLS PostgreSQL URL>
+NEXT_PUBLIC_APP_URL=https://<frontend-host>
+AUTH_DOMAIN=<frontend-host-without-scheme>
+ARC_RPC_URL=https://rpc.testnet.arc.network
+ARC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
+ARC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
+WEBHOOK_ENCRYPTION_KEY=<base64 32-byte secret>
+ALLOWED_WEBHOOK_HOSTS=<comma-separated merchant hosts>
+```
+
+### Worker environment
+
+```text
+NODE_ENV=production
+DEMO_MODE=false
+DATABASE_URL=<same TLS PostgreSQL URL>
+ARC_RPC_URL=https://rpc.testnet.arc.network
+ARC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
+ARC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
+ARC_DEPLOYMENT_BLOCK=<verified deployment block>
+ARC_INDEXER_PAGE_SIZE=1000
+CIRCLE_API_BASE_URL=https://iris-api-sandbox.circle.com
+WEBHOOK_ENCRYPTION_KEY=<same secret as API>
+SETTLER_PRIVATE_KEY=<optional dedicated low-value key>
+```
+
+If automated settlement is enabled, create a dedicated low-value settler wallet, fund it with minimal Arc Testnet USDC, never reuse the deployer, merchant, treasury, or customer key, and store it only in the platform secret manager.
+
+## 3. Health and rollout checks
+
+- `GET /api/health` verifies API process and database connectivity.
+- Worker `GET /health` (default port `4001`) reports database, Arc RPC, Circle API reachability, worker tick state, cursor, finalized head, lag, and indexer errors.
+- Treat database/RPC/Circle failure, worker tick errors, or growing finalized-block lag as rollout failures.
+- Verify CORS credentials, CSP/security headers, TLS, rate limits, request limits, backups, and alerting.
+
+## 4. Evidence and rollback
+
+Record each successful receipt with `pnpm record:evidence -- ...`; see the command help and `docs/TRANSACTION_EVIDENCE.md`. Do not type hashes or URLs into submission material until the recorder or equivalent direct verification confirms them.
+
+Application services can roll back to a prior immutable image. Contract deployments cannot roll back; pause only new invoice creation if necessary, preserve settlement/refund paths, and deploy a new version rather than mutating recorded evidence.

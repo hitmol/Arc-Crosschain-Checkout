@@ -755,13 +755,19 @@ async function safeTick(): Promise<void> {
 
 const healthServer = createServer((_request, response) => {
   void (async () => {
-    const [database, rpc, cursor] = await Promise.all([
+    const [database, rpc, circle, cursor] = await Promise.all([
       prisma.$queryRaw`SELECT 1`.then(
         () => true,
         () => false,
       ),
       publicClient.getBlockNumber().then(
         () => true,
+        () => false,
+      ),
+      fetch(`${env.CIRCLE_API_BASE_URL}/v2/burn/USDC/fees/6/26?forward=true`, {
+        signal: AbortSignal.timeout(10_000),
+      }).then(
+        (result) => result.ok,
         () => false,
       ),
       prisma.indexerCursor.findUnique({
@@ -779,7 +785,7 @@ const healthServer = createServer((_request, response) => {
         : cursor.finalizedBlock > cursor.blockNumber
           ? cursor.finalizedBlock - cursor.blockNumber
           : 0n;
-    const healthy = database && rpc && !workerState.lastTickError;
+    const healthy = database && rpc && circle && !workerState.lastTickError;
     response.writeHead(healthy ? 200 : 503, {
       "content-type": "application/json",
       "cache-control": "no-store",
@@ -789,6 +795,7 @@ const healthServer = createServer((_request, response) => {
         status: healthy ? "ok" : "degraded",
         database,
         arcRpc: rpc,
+        circleApi: circle,
         indexer: {
           configured: Boolean(
             env.ARC_MERCHANT_REGISTRY_ADDRESS &&
