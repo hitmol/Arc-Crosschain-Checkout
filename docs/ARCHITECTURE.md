@@ -79,3 +79,9 @@ classDiagram
 - Forwarding removes destination-mint signer and gas requirements.
 - The worker treats source receipts, raw CCTP messages, and Arc USDC logs as the settlement evidence; an Iris `forwardTxHash` alone is insufficient.
 - Webhook delivery begins only after onchain-derived state changes.
+
+## Finalized indexing and settlement recovery
+
+The Arc indexer reads only the RPC `finalized` block, processes a bounded page in log order, and advances its durable cursor only after every log in that page succeeds. Replayed pages and duplicate logs are harmless because chain ID, transaction hash, and log index form the database identity. Cursor health records the observed head, finalized block, processed block, last success, and last error.
+
+Automatic settlement uses an atomic PostgreSQL claim plus a unique lock token. The worker signs the exact permissionless `settle()` transaction, persists its raw signed transaction and deterministic hash before broadcast, then broadcasts that same payload. A crash before or after broadcast therefore resumes one transaction instead of creating a second nonce. Submission history preserves confirmed, reverted, failed, and stale-recovered attempts; only the finalized `PaymentSettled` event establishes accounting.

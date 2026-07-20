@@ -26,6 +26,7 @@ Quotes are issued and stored by the API, expire quickly, and are claimed atomica
 - Pause never blocks an existing vault's settlement or refund.
 - Unsupported tokens may be recovered by the merchant; vault USDC cannot use that path.
 - A source burn is accepted only after receipt success, required confirmations, and direct payer-sender verification. The raw CCTP V2 message must match the authorized route, contracts, token, vault, payer, amount, maximum fee, finality, and forwarding hook. An Arc mint additionally requires a successful receipt and exact USDC transfer log; `forwardTxHash` alone is not settlement evidence.
+- The optional settler can call only the same permissionless `settle()` entry point available to any user. Settlement claims are atomic, and the signed transaction hash is persisted before broadcast so worker crashes do not create a second settlement transaction. A signed settlement payload contains no reusable withdrawal authority.
 
 ## Backend and webhooks
 

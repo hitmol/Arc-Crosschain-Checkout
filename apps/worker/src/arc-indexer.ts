@@ -116,7 +116,7 @@ function jsonPayload(args: Record<string, unknown>): Record<string, unknown> {
   );
 }
 
-async function processLog(
+export async function processArcLog(
   options: ArcIndexerOptions,
   log: Log<bigint, number, false>,
 ): Promise<void> {
@@ -317,6 +317,7 @@ async function processLog(
             data: { active: false, status: "EXPIRED" },
           });
         } else if (eventName === "PaymentSettled") {
+          const transactionHash = log.transactionHash.toLowerCase();
           await transaction.paymentIntent.update({
             where: { id: intent.id },
             data: {
@@ -325,10 +326,18 @@ async function processLog(
               settlementMerchantAmount: bigintArg(args, "merchantAmount"),
               protocolFeeAmount: bigintArg(args, "protocolFee"),
               excessAmount: bigintArg(args, "refundedExcess"),
-              settlementTransactionHash: log.transactionHash.toLowerCase(),
+              settlementTransactionHash: transactionHash,
               settlementLockId: null,
               settlementLockedAt: null,
               settledAt: new Date(),
+            },
+          });
+          await transaction.settlementSubmission.updateMany({
+            where: { transactionHash },
+            data: {
+              status: "CONFIRMED",
+              confirmedAt: new Date(),
+              errorMessage: null,
             },
           });
         } else if (eventName === "PaymentCancelled") {
@@ -377,62 +386,144 @@ async function processLog(
   }
 }
 
-export async function indexArcEvents(
-  options: ArcIndexerOptions,
-): Promise<{ processedThrough: bigint | null; logCount: number }> {
-  const [headBlock, cursor] = await Promise.all([
-    options.client.getBlockNumber(),
-    prisma.indexerCursor.findUnique({
+export async function indexArcEvents(options: ArcIndexerOptions): Promise<{
+  processedThrough: bigint | null;
+  logCount: number;
+  headBlock: bigint;
+  finalizedBlock: bigint;
+  lag: bigint;
+}> {
+  let headBlock: bigint | null = null;
+  try {
+    const [currentHead, finalized, cursor] = await Promise.all([
+      options.client.getBlockNumber(),
+      options.client.getBlock({ blockTag: "finalized" }),
+      prisma.indexerCursor.findUnique({
+        where: {
+          chainId_stream: { chainId: options.chainId, stream: "arc-events" },
+        },
+      }),
+    ]);
+    headBlock = currentHead;
+    if (finalized.number === null)
+      throw new Error("Arc RPC returned a finalized block without a number");
+    const finalizedBlock = finalized.number;
+    const range = nextBlockRange({
+      cursorBlock: cursor?.blockNumber ?? null,
+      deploymentBlock: options.deploymentBlock,
+      headBlock: finalizedBlock,
+      pageSize: options.pageSize,
+    });
+    if (!range) {
+      const processedThrough =
+        cursor?.blockNumber ?? options.deploymentBlock - 1n;
+      await prisma.indexerCursor.upsert({
+        where: {
+          chainId_stream: { chainId: options.chainId, stream: "arc-events" },
+        },
+        update: {
+          headBlock,
+          finalizedBlock,
+          lastSuccessAt: new Date(),
+          lastError: null,
+          lastErrorAt: null,
+        },
+        create: {
+          chainId: options.chainId,
+          stream: "arc-events",
+          blockNumber: processedThrough,
+          headBlock,
+          finalizedBlock,
+          lastSuccessAt: new Date(),
+        },
+      });
+      return {
+        processedThrough,
+        logCount: 0,
+        headBlock,
+        finalizedBlock,
+        lag:
+          finalizedBlock > processedThrough
+            ? finalizedBlock - processedThrough
+            : 0n,
+      };
+    }
+
+    const [registryLogs, factoryLogs, vaultLogs] = await Promise.all([
+      options.client.getLogs({
+        address: options.merchantRegistryAddress,
+        fromBlock: range.fromBlock,
+        toBlock: range.toBlock,
+      }),
+      options.client.getLogs({
+        address: options.checkoutFactoryAddress,
+        fromBlock: range.fromBlock,
+        toBlock: range.toBlock,
+      }),
+      options.client.getLogs({
+        events: paymentVaultEvents,
+        fromBlock: range.fromBlock,
+        toBlock: range.toBlock,
+      }),
+    ]);
+    const logs = [...registryLogs, ...factoryLogs, ...vaultLogs].sort(
+      (left, right) =>
+        left.blockNumber === right.blockNumber
+          ? (left.logIndex ?? 0) - (right.logIndex ?? 0)
+          : left.blockNumber < right.blockNumber
+            ? -1
+            : 1,
+    );
+    for (const log of logs) await processArcLog(options, log);
+
+    await prisma.indexerCursor.upsert({
       where: {
         chainId_stream: { chainId: options.chainId, stream: "arc-events" },
       },
-    }),
-  ]);
-  const range = nextBlockRange({
-    cursorBlock: cursor?.blockNumber ?? null,
-    deploymentBlock: options.deploymentBlock,
-    headBlock,
-    pageSize: options.pageSize,
-  });
-  if (!range) return { processedThrough: null, logCount: 0 };
-
-  const [registryLogs, factoryLogs, vaultLogs] = await Promise.all([
-    options.client.getLogs({
-      address: options.merchantRegistryAddress,
-      fromBlock: range.fromBlock,
-      toBlock: range.toBlock,
-    }),
-    options.client.getLogs({
-      address: options.checkoutFactoryAddress,
-      fromBlock: range.fromBlock,
-      toBlock: range.toBlock,
-    }),
-    options.client.getLogs({
-      events: paymentVaultEvents,
-      fromBlock: range.fromBlock,
-      toBlock: range.toBlock,
-    }),
-  ]);
-  const logs = [...registryLogs, ...factoryLogs, ...vaultLogs].sort(
-    (left, right) =>
-      left.blockNumber === right.blockNumber
-        ? (left.logIndex ?? 0) - (right.logIndex ?? 0)
-        : left.blockNumber < right.blockNumber
-          ? -1
-          : 1,
-  );
-  for (const log of logs) await processLog(options, log);
-
-  await prisma.indexerCursor.upsert({
-    where: {
-      chainId_stream: { chainId: options.chainId, stream: "arc-events" },
-    },
-    update: { blockNumber: range.toBlock },
-    create: {
-      chainId: options.chainId,
-      stream: "arc-events",
-      blockNumber: range.toBlock,
-    },
-  });
-  return { processedThrough: range.toBlock, logCount: logs.length };
+      update: {
+        blockNumber: range.toBlock,
+        headBlock,
+        finalizedBlock,
+        lastSuccessAt: new Date(),
+        lastError: null,
+        lastErrorAt: null,
+      },
+      create: {
+        chainId: options.chainId,
+        stream: "arc-events",
+        blockNumber: range.toBlock,
+        headBlock,
+        finalizedBlock,
+        lastSuccessAt: new Date(),
+      },
+    });
+    return {
+      processedThrough: range.toBlock,
+      logCount: logs.length,
+      headBlock,
+      finalizedBlock,
+      lag: finalizedBlock - range.toBlock,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    await prisma.indexerCursor.upsert({
+      where: {
+        chainId_stream: { chainId: options.chainId, stream: "arc-events" },
+      },
+      update: {
+        ...(headBlock === null ? {} : { headBlock }),
+        lastError: message.slice(0, 500),
+        lastErrorAt: new Date(),
+      },
+      create: {
+        chainId: options.chainId,
+        stream: "arc-events",
+        blockNumber: options.deploymentBlock - 1n,
+        ...(headBlock === null ? {} : { headBlock }),
+        lastError: message.slice(0, 500),
+        lastErrorAt: new Date(),
+      },
+    });
+    throw error;
+  }
 }

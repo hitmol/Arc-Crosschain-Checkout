@@ -40,6 +40,15 @@ enum WebhookDeliveryStatus {
   FAILED
 }
 
+enum SettlementSubmissionStatus {
+  CLAIMED
+  PREPARED
+  SUBMITTED
+  CONFIRMED
+  REVERTED
+  FAILED
+}
+
 model Merchant {
   id            String             @id @default(uuid())
   walletAddress String             @unique
@@ -86,6 +95,7 @@ model PaymentIntent {
   merchant                  Merchant           @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   attempts                  PaymentAttempt[]
   quotes                    PaymentQuote[]
+  settlementSubmissions     SettlementSubmission[]
   transactions              ChainTransaction[]
 
   @@unique([merchantId, orderId])
@@ -190,6 +200,24 @@ model ChainTransaction {
   @@unique([chainId, transactionHash, logIndex])
 }
 
+model SettlementSubmission {
+  id               String                     @id @default(uuid())
+  lockToken        String                     @unique
+  transactionHash  String?                    @unique
+  rawTransaction   String?
+  status           SettlementSubmissionStatus @default(CLAIMED)
+  errorMessage     String?
+  submittedAt      DateTime?
+  confirmedAt      DateTime?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  paymentIntentId  String
+  paymentIntent    PaymentIntent              @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentIntentId, createdAt])
+  @@index([status, updatedAt])
+}
+
 model AuthChallenge {
   id            String    @id @default(uuid())
   walletAddress String
@@ -266,11 +294,16 @@ model WebhookDelivery {
 }
 
 model IndexerCursor {
-  id          String   @id @default(uuid())
-  chainId     Int
-  stream      String
-  blockNumber BigInt
-  updatedAt   DateTime @updatedAt
+  id             String    @id @default(uuid())
+  chainId        Int
+  stream         String
+  blockNumber    BigInt
+  headBlock      BigInt?
+  finalizedBlock BigInt?
+  lastSuccessAt  DateTime?
+  lastError      String?
+  lastErrorAt    DateTime?
+  updatedAt      DateTime  @updatedAt
 
   @@unique([chainId, stream])
 }

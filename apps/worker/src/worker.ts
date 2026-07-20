@@ -1,4 +1,5 @@
 import { createDecipheriv, createHash, createHmac } from "node:crypto";
+import { createServer } from "node:http";
 import {
   prisma,
   type PaymentIntent,
@@ -15,7 +16,9 @@ import pino from "pino";
 import {
   createPublicClient,
   createWalletClient,
+  encodeFunctionData,
   http,
+  keccak256,
   parseAbi,
   type Address,
   type Hex,
@@ -29,6 +32,14 @@ import {
   validateSourceTransaction,
   validatedArcMintAmount,
 } from "./cctp-reconciliation.js";
+import {
+  claimSettlement,
+  failSettlementClaim,
+  markSettlementConfirmed,
+  markSettlementReverted,
+  markSettlementSubmitted,
+  storePreparedSettlement,
+} from "./settlement-lock.js";
 
 const env = z
   .object({
@@ -67,6 +78,7 @@ const env = z
       .enum(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
+    WORKER_PORT: z.coerce.number().int().min(1).max(65_535).default(4001),
     WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     LOG_LEVEL: z.string().default("info"),
   })
@@ -332,9 +344,59 @@ async function reconcileVaults() {
     take: 100,
   });
   for (const intent of intents) {
-    let settlementLockId: string | null = null;
+    let claim: { submissionId: string; lockToken: string } | null = null;
     try {
       const address = intent.vaultAddress as Address;
+      const pendingSubmission = await prisma.settlementSubmission.findFirst({
+        where: {
+          paymentIntentId: intent.id,
+          status: { in: ["PREPARED", "SUBMITTED"] },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (pendingSubmission) {
+        if (!pendingSubmission.transactionHash) {
+          throw new Error("Pending settlement is missing its transaction hash");
+        }
+        const transactionHash = pendingSubmission.transactionHash as Hex;
+        let receipt = await publicClient
+          .getTransactionReceipt({ hash: transactionHash })
+          .catch(() => null);
+        if (
+          !receipt &&
+          pendingSubmission.status === "PREPARED" &&
+          pendingSubmission.rawTransaction
+        ) {
+          if (!walletClient) continue;
+          const broadcastHash = await walletClient.sendRawTransaction({
+            serializedTransaction: pendingSubmission.rawTransaction as Hex,
+          });
+          if (broadcastHash.toLowerCase() !== transactionHash)
+            throw new Error("Broadcast settlement hash changed after signing");
+          await markSettlementSubmitted(pendingSubmission.id);
+          receipt = await publicClient
+            .waitForTransactionReceipt({
+              hash: transactionHash,
+              confirmations: 1,
+            })
+            .catch(() => null);
+        }
+        if (!receipt) continue;
+        if (receipt.status === "success") {
+          await markSettlementConfirmed({
+            paymentIntentId: intent.id,
+            submissionId: pendingSubmission.id,
+            transactionHash,
+          });
+        } else {
+          await markSettlementReverted({
+            paymentIntentId: intent.id,
+            submissionId: pendingSubmission.id,
+            errorMessage: "Settlement transaction reverted",
+          });
+        }
+        continue;
+      }
       const [balance, state] = await Promise.all([
         publicClient.readContract({
           address,
@@ -368,67 +430,69 @@ async function reconcileVaults() {
         },
       });
       if (nextStatus === "FUNDED" && walletClient && account) {
-        settlementLockId = crypto.randomUUID();
         const staleBefore = new Date(Date.now() - 2 * 60_000);
-        const claimed = await prisma.paymentIntent.updateMany({
-          where: {
-            id: intent.id,
-            OR: [
-              { status: "FUNDED", settlementLockId: null },
-              { status: "SETTLING", settlementLockedAt: { lt: staleBefore } },
-            ],
-          },
-          data: {
-            status: "SETTLING",
-            settlementLockId,
-            settlementLockedAt: new Date(),
-          },
+        claim = await claimSettlement({
+          paymentIntentId: intent.id,
+          lockToken: crypto.randomUUID(),
+          staleBefore,
         });
-        if (claimed.count !== 1) {
-          settlementLockId = null;
-          continue;
-        }
-        const hash = await walletClient.writeContract({
-          address,
+        if (!claim) continue;
+        const data = encodeFunctionData({
           abi: vaultAbi,
           functionName: "settle",
+        });
+        const request = await walletClient.prepareTransactionRequest({
           account,
           chain: arcTestnet,
+          to: address,
+          data,
         });
+        const rawTransaction = await walletClient.signTransaction(request);
+        const hash = keccak256(rawTransaction);
+        await storePreparedSettlement({
+          paymentIntentId: intent.id,
+          submissionId: claim.submissionId,
+          lockToken: claim.lockToken,
+          transactionHash: hash,
+          rawTransaction,
+        });
+        const broadcastHash = await walletClient.sendRawTransaction({
+          serializedTransaction: rawTransaction,
+        });
+        if (broadcastHash.toLowerCase() !== hash.toLowerCase())
+          throw new Error("Broadcast settlement hash changed after signing");
+        await markSettlementSubmitted(claim.submissionId);
         const receipt = await publicClient.waitForTransactionReceipt({
           hash,
           confirmations: 1,
         });
         if (receipt.status === "success") {
-          await prisma.paymentIntent.update({
-            where: { id: intent.id },
-            data: {
-              status: "SETTLING",
-              settlementTransactionHash: hash,
-            },
+          await markSettlementConfirmed({
+            paymentIntentId: intent.id,
+            submissionId: claim.submissionId,
+            transactionHash: hash,
           });
         } else {
-          await prisma.paymentIntent.updateMany({
-            where: { id: intent.id, settlementLockId },
-            data: {
-              status: "FUNDED",
-              settlementLockId: null,
-              settlementLockedAt: null,
-            },
+          await markSettlementReverted({
+            paymentIntentId: intent.id,
+            submissionId: claim.submissionId,
+            errorMessage: "Settlement transaction reverted",
           });
-          settlementLockId = null;
         }
       }
     } catch (error) {
-      if (settlementLockId) {
-        await prisma.paymentIntent.updateMany({
-          where: { id: intent.id, settlementLockId },
-          data: {
-            status: "FUNDED",
-            settlementLockId: null,
-            settlementLockedAt: null,
-          },
+      if (claim) {
+        const submission = await prisma.settlementSubmission.findUnique({
+          where: { id: claim.submissionId },
         });
+        if (submission?.status === "CLAIMED") {
+          await failSettlementClaim({
+            paymentIntentId: intent.id,
+            submissionId: claim.submissionId,
+            lockToken: claim.lockToken,
+            errorMessage: error instanceof Error ? error.message : "unknown",
+          });
+        }
       }
       logger.warn(
         {
@@ -592,22 +656,129 @@ async function tick() {
       env.ARC_CHECKOUT_FACTORY_ADDRESS &&
       env.ARC_DEPLOYMENT_BLOCK !== undefined
     ) {
-      const indexed = await indexArcEvents({
-        client: publicClient,
-        chainId: arcTestnet.id,
-        merchantRegistryAddress: env.ARC_MERCHANT_REGISTRY_ADDRESS as Address,
-        checkoutFactoryAddress: env.ARC_CHECKOUT_FACTORY_ADDRESS as Address,
-        deploymentBlock: env.ARC_DEPLOYMENT_BLOCK,
-        pageSize: env.ARC_INDEXER_PAGE_SIZE,
-      });
-      if (indexed.logCount > 0)
-        logger.info(indexed, "indexed finalized Arc events");
+      try {
+        const indexed = await indexArcEvents({
+          client: publicClient,
+          chainId: arcTestnet.id,
+          merchantRegistryAddress: env.ARC_MERCHANT_REGISTRY_ADDRESS as Address,
+          checkoutFactoryAddress: env.ARC_CHECKOUT_FACTORY_ADDRESS as Address,
+          deploymentBlock: env.ARC_DEPLOYMENT_BLOCK,
+          pageSize: env.ARC_INDEXER_PAGE_SIZE,
+        });
+        workerState.indexerError = null;
+        if (indexed.logCount > 0)
+          logger.info(indexed, "indexed finalized Arc events");
+      } catch (error) {
+        workerState.indexerError =
+          error instanceof Error ? error.message : "unknown";
+        logger.error({ error: workerState.indexerError }, "Arc indexer failed");
+      }
     }
     await reconcileCctpAttempts();
     await reconcileVaults();
   }
   await processWebhookQueue();
 }
+
+const workerState: {
+  startedAt: string;
+  lastTickStartedAt: string | null;
+  lastTickCompletedAt: string | null;
+  lastTickError: string | null;
+  indexerError: string | null;
+  tickRunning: boolean;
+} = {
+  startedAt: new Date().toISOString(),
+  lastTickStartedAt: null,
+  lastTickCompletedAt: null,
+  lastTickError: null,
+  indexerError: null,
+  tickRunning: false,
+};
+
+async function safeTick(): Promise<void> {
+  if (workerState.tickRunning) {
+    logger.warn("Skipping overlapping worker tick");
+    return;
+  }
+  workerState.tickRunning = true;
+  workerState.lastTickStartedAt = new Date().toISOString();
+  try {
+    await tick();
+    workerState.lastTickCompletedAt = new Date().toISOString();
+    workerState.lastTickError = null;
+  } catch (error) {
+    workerState.lastTickError =
+      error instanceof Error ? error.message : "unknown";
+    logger.error({ error: workerState.lastTickError }, "worker tick failed");
+  } finally {
+    workerState.tickRunning = false;
+  }
+}
+
+const healthServer = createServer((_request, response) => {
+  void (async () => {
+    const [database, rpc, cursor] = await Promise.all([
+      prisma.$queryRaw`SELECT 1`.then(
+        () => true,
+        () => false,
+      ),
+      publicClient.getBlockNumber().then(
+        () => true,
+        () => false,
+      ),
+      prisma.indexerCursor.findUnique({
+        where: {
+          chainId_stream: {
+            chainId: arcTestnet.id,
+            stream: "arc-events",
+          },
+        },
+      }),
+    ]);
+    const indexerLag =
+      cursor?.finalizedBlock === null || cursor?.finalizedBlock === undefined
+        ? null
+        : cursor.finalizedBlock > cursor.blockNumber
+          ? cursor.finalizedBlock - cursor.blockNumber
+          : 0n;
+    const healthy = database && rpc && !workerState.lastTickError;
+    response.writeHead(healthy ? 200 : 503, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+    });
+    response.end(
+      JSON.stringify({
+        status: healthy ? "ok" : "degraded",
+        database,
+        arcRpc: rpc,
+        indexer: {
+          configured: Boolean(
+            env.ARC_MERCHANT_REGISTRY_ADDRESS &&
+            env.ARC_CHECKOUT_FACTORY_ADDRESS &&
+            env.ARC_DEPLOYMENT_BLOCK !== undefined,
+          ),
+          processedBlock: cursor?.blockNumber.toString() ?? null,
+          finalizedBlock: cursor?.finalizedBlock?.toString() ?? null,
+          headBlock: cursor?.headBlock?.toString() ?? null,
+          lag: indexerLag?.toString() ?? null,
+          lastSuccessAt: cursor?.lastSuccessAt?.toISOString() ?? null,
+          lastError: cursor?.lastError ?? workerState.indexerError,
+        },
+        worker: workerState,
+      }),
+    );
+  })().catch((error) => {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        status: "error",
+        error: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+  });
+});
+healthServer.listen(env.WORKER_PORT);
 
 logger.info(
   {
@@ -621,11 +792,12 @@ logger.info(
   },
   "settlement worker started",
 );
-void tick();
-const timer = setInterval(() => void tick(), env.WORKER_POLL_INTERVAL_MS);
+void safeTick();
+const timer = setInterval(() => void safeTick(), env.WORKER_POLL_INTERVAL_MS);
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     clearInterval(timer);
+    healthServer.close();
     void prisma.$disconnect().finally(() => process.exit(0));
   });
 }
