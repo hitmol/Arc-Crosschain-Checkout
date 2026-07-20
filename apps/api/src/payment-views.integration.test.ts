@@ -23,7 +23,9 @@ describeWithDatabase("merchant dashboard and verified receipts", () => {
     await prisma.chainTransaction.deleteMany({
       where: { transactionHash: settlementHash },
     });
-    await prisma.paymentIntent.deleteMany({ where: { merchantId } });
+    await prisma.paymentIntent.deleteMany({
+      where: { merchant: { walletAddress: merchantAddress } },
+    });
     await prisma.merchant.deleteMany({
       where: { walletAddress: merchantAddress },
     });
@@ -130,6 +132,9 @@ describeWithDatabase("merchant dashboard and verified receipts", () => {
   afterAll(async () => {
     await prisma.chainTransaction.deleteMany({
       where: { transactionHash: settlementHash },
+    });
+    await prisma.paymentIntent.deleteMany({
+      where: { merchant: { walletAddress: merchantAddress } },
     });
     await prisma.merchant.deleteMany({
       where: { walletAddress: merchantAddress },
