@@ -30,6 +30,7 @@ jobs:
         with: { version: 11.9.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
+      - uses: foundry-rs/foundry-toolchain@v1
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm --filter @arc-checkout/database migrate:deploy
