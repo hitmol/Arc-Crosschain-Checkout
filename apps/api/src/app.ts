@@ -14,12 +14,14 @@ import { fetchCheckoutQuote } from "@arc-checkout/cctp";
 import { prisma } from "@arc-checkout/database";
 import {
   formatUsdc,
+  addressSchema,
   orderIdToBytes32,
   parseUsdc,
   paymentAttemptInputSchema,
   paymentIntentInputSchema,
   webhookInputSchema,
 } from "@arc-checkout/shared";
+import { isAddressEqual, zeroAddress } from "viem";
 import { config } from "./config.js";
 import {
   ReconciliationError,
@@ -44,6 +46,7 @@ import {
   type AuthPrincipal,
 } from "./auth.js";
 import { jsonSafe } from "./serialize.js";
+import { verifyPaymentAuthorization } from "./payment-authorization.js";
 import {
   assertSafeWebhookUrl,
   decryptSecret,
@@ -477,7 +480,7 @@ export function createApp(): Application {
       const input = z
         .object({
           merchantAddress: paymentIntentInputSchema.shape.merchantAddress,
-          payoutAddress: paymentIntentInputSchema.shape.refundAddress,
+          payoutAddress: addressSchema,
           displayName: z.string().trim().min(1).max(80).optional(),
           metadataHash: z
             .string()
@@ -608,7 +611,7 @@ export function createApp(): Application {
           orderId: input.orderId,
           orderIdBytes32: orderIdToBytes32(input.orderId),
           expectedAmount: parseUsdc(input.amount),
-          refundAddress: input.refundAddress.toLowerCase(),
+          refundAddress: null,
           payoutAddress: merchant.payoutAddress,
           vaultAddress:
             input.vaultAddress?.toLowerCase() ??
@@ -693,7 +696,6 @@ export function createApp(): Application {
           orderId: input.orderId,
           amount: input.amount,
           expiresAt: input.expiresAt,
-          refundAddress: input.refundAddress as `0x${string}`,
           ...(input.description === undefined
             ? {}
             : { description: input.description }),
@@ -714,7 +716,7 @@ export function createApp(): Application {
             orderId: input.orderId,
             orderIdBytes32: verified.orderIdBytes32,
             expectedAmount: verified.expectedAmount,
-            refundAddress: verified.refundAddress,
+            refundAddress: null,
             payoutAddress: verified.payoutAddress,
             vaultAddress: verified.vaultAddress,
             description: input.description ?? null,
@@ -740,7 +742,6 @@ export function createApp(): Application {
               merchant: verified.merchantAddress,
               vault: verified.vaultAddress,
               payoutAddress: verified.payoutAddress,
-              refundAddress: verified.refundAddress,
               expectedAmount: verified.expectedAmount.toString(),
               protocolFeeBps: verified.protocolFeeBps,
               expiresAt: verified.expiresAt.toISOString(),
@@ -895,7 +896,6 @@ export function createApp(): Application {
 
   app.post(
     "/api/payment-intents/:id/attempts",
-    merchantGuard("payment-intents:write"),
     asyncRoute(async (request, response) => {
       const input = paymentAttemptInputSchema.parse(request.body);
       const intent = await prisma.paymentIntent.findFirst({
@@ -910,15 +910,129 @@ export function createApp(): Application {
         response.status(404).json({ error: "Payment intent not found" });
         return;
       }
-      const attempt = await prisma.paymentAttempt.create({
-        data: {
-          paymentIntentId: intent.id,
-          sourceChainId: input.sourceChainId,
-          customerAddress: input.customerAddress.toLowerCase(),
-          quotedSourceAmount: parseUsdc(input.quotedSourceAmount),
-          sourceTransactionHash: input.sourceTransactionHash ?? null,
-          status: input.sourceTransactionHash ? "BURN_SUBMITTED" : "QUOTED",
-        },
+      if (intent.status !== "OPEN" || intent.expiresAt <= new Date()) {
+        response.status(409).json({ error: "Invoice is not payable" });
+        return;
+      }
+      if (
+        isAddressEqual(input.customerAddress as `0x${string}`, zeroAddress) ||
+        isAddressEqual(input.refundAddress as `0x${string}`, zeroAddress)
+      ) {
+        response
+          .status(400)
+          .json({ error: "Payer and refund addresses must be non-zero" });
+        return;
+      }
+      if (
+        !intent.vaultAddress ||
+        !isAddressEqual(
+          intent.vaultAddress as `0x${string}`,
+          input.invoiceVault as `0x${string}`,
+        )
+      ) {
+        response
+          .status(400)
+          .json({ error: "Attempt vault does not match the verified invoice" });
+        return;
+      }
+      if (
+        orderIdToBytes32(input.orderId).toLowerCase() !==
+        intent.orderIdBytes32.toLowerCase()
+      ) {
+        response
+          .status(400)
+          .json({ error: "Attempt order ID does not match the invoice" });
+        return;
+      }
+      const destinationAmount = parseUsdc(input.destinationAmount);
+      const maximumSourceAmount = parseUsdc(input.maximumSourceAmount);
+      const quotedSourceAmount = parseUsdc(input.quotedSourceAmount);
+      const quoteExpiresAt = new Date(input.quoteExpiresAt);
+      const attemptExpiresAt = new Date(input.attemptExpiresAt);
+      if (
+        destinationAmount !== intent.expectedAmount ||
+        maximumSourceAmount !== quotedSourceAmount ||
+        maximumSourceAmount < destinationAmount ||
+        quoteExpiresAt <= new Date() ||
+        attemptExpiresAt <= quoteExpiresAt ||
+        attemptExpiresAt > intent.expiresAt
+      ) {
+        response.status(400).json({
+          error: "Payment attempt does not match the active quote or invoice",
+        });
+        return;
+      }
+      const message = {
+        attemptId: input.attemptId as `0x${string}`,
+        sourceChainId: BigInt(input.sourceChainId),
+        destinationChainId: BigInt(input.destinationChainId),
+        invoiceVault: input.invoiceVault as `0x${string}`,
+        orderId: intent.orderIdBytes32 as `0x${string}`,
+        payer: input.customerAddress as `0x${string}`,
+        refundAddress: input.refundAddress as `0x${string}`,
+        destinationAmount,
+        maximumSourceAmount,
+        quoteExpiresAt: BigInt(Math.floor(quoteExpiresAt.getTime() / 1000)),
+        nonce: BigInt(input.nonce),
+        attemptExpiresAt: BigInt(Math.floor(attemptExpiresAt.getTime() / 1000)),
+      } as const;
+      const digest = await verifyPaymentAuthorization({
+        message,
+        signature: input.signature as `0x${string}`,
+        claimedDigest: input.authorizationDigest as `0x${string}`,
+      }).catch(() => null);
+      if (!digest) {
+        response
+          .status(401)
+          .json({ error: "Invalid payment attempt authorization" });
+        return;
+      }
+      const attempt = await prisma.$transaction(async (transaction) => {
+        const active = await transaction.paymentAttempt.findFirst({
+          where: { paymentIntentId: intent.id, active: true },
+        });
+        if (active) {
+          if (
+            !active.attemptExpiresAt ||
+            active.attemptExpiresAt > new Date() ||
+            active.customerAddress !== input.customerAddress.toLowerCase() ||
+            active.refundAddress !== input.refundAddress.toLowerCase()
+          )
+            throw new AuthError(
+              "Invoice already has a conflicting active customer attempt",
+              409,
+            );
+          await transaction.paymentAttempt.update({
+            where: { id: active.id },
+            data: { active: false, status: "EXPIRED" },
+          });
+        }
+        return transaction.paymentAttempt.create({
+          data: {
+            attemptIdentifier: input.attemptId.toLowerCase(),
+            active: true,
+            vaultAddress: input.invoiceVault.toLowerCase(),
+            orderIdBytes32: intent.orderIdBytes32,
+            paymentIntentId: intent.id,
+            sourceChainId: input.sourceChainId,
+            destinationChainId: input.destinationChainId,
+            customerAddress: input.customerAddress.toLowerCase(),
+            refundAddress: input.refundAddress.toLowerCase(),
+            destinationAmount,
+            quotedSourceAmount,
+            maximumSourceAmount,
+            quoteExpiresAt,
+            nonce: BigInt(input.nonce),
+            attemptExpiresAt,
+            authorizationDigest: digest.toLowerCase(),
+            signature: input.signature.toLowerCase(),
+            registeredTransactionHash:
+              input.registeredTransactionHash?.toLowerCase() ?? null,
+            sourceTransactionHash:
+              input.sourceTransactionHash?.toLowerCase() ?? null,
+            status: input.registeredTransactionHash ? "REGISTERED" : "QUOTED",
+          },
+        });
       });
       response.status(201).json(jsonSafe(attempt));
     }),

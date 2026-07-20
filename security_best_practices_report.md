@@ -5,9 +5,9 @@ Scope: Solidity contracts, API, worker, web application, database schema, depend
 
 ## Executive summary
 
-No critical or high-severity findings were identified in this implementation review. The contracts compiled and passed 12 unit/fuzz tests plus two stateful invariants. Static secret/dangerous-pattern scanning passed. The production dependency audit reports no critical, high, or moderate advisories; one low-severity transitive advisory remains because the patched `elliptic` version named by the advisory is not published to npm.
+No critical or high-severity findings were identified in this implementation review. The merchant-controlled refund finding is resolved by customer-signed EIP-712 payment attempts. The contracts compile and pass unit, fuzz and stateful invariant tests. Static secret/dangerous-pattern scanning passed. The production dependency audit reports no critical, high, or moderate advisories; one low-severity transitive advisory remains because the patched `elliptic` version named by the advisory is not published to npm.
 
-This is still unaudited testnet software. Merchant-scoped authentication is implemented, but a production launch remains blocked on independent contract review and customer-owned refund authorization.
+This is still unaudited testnet software. A production launch remains blocked on independent contract review, complete attempt-before-burn UI/CCTP validation, deployment verification and real transaction evidence.
 
 ## Open findings
 
@@ -35,7 +35,7 @@ This is still unaudited testnet software. Merchant-scoped authentication is impl
 - Existing vaults remain usable when factory creation is paused (`CheckoutFactory.sol:120`).
 - Fee configuration is capped at 500 bps and snapshotted into each invoice (`FeeManager.sol:10`).
 - Settlement uses checks-effects-interactions, reentrancy protection, and `SafeERC20`; terminal state is written before transfers (`PaymentVault.sol:146-160`).
-- Refund and overpayment destinations are immutable per vault; the unsupported-token recovery path rejects USDC (`PaymentVault.sol:174-198`).
+- Customer EIP-712 authorization locks payer/refund ownership; nonce and attempt ID replay are rejected; the unsupported-token recovery path rejects USDC (`PaymentVault.sol`).
 - Webhook secrets use AES-256-GCM at rest, HMAC-SHA256 signatures, timestamped payloads, HTTPS restrictions, DNS/private-IP SSRF checks, and bounded retries (`apps/api/src/security.ts:19-116`).
 - API mutation payloads are validated, bodies are limited to 64 KiB, rate limits are enabled, and payment-intent creation requires idempotency keys (`apps/api/src/app.ts:70-105`, `apps/api/src/app.ts:171-236`).
 - Demo mode now defaults off, cannot run under `NODE_ENV=production`, and non-demo API/worker processes fail closed without required secrets (`apps/api/src/config.ts:27-36`, `apps/worker/src/worker.ts:52-56`).
@@ -49,13 +49,15 @@ This is still unaudited testnet software. Merchant-scoped authentication is impl
 - `pnpm lint` — passed after review fixes.
 - `pnpm typecheck` — passed across all workspaces.
 - `pnpm build` — passed across all workspaces.
-- Foundry — 14 tests passed, including fuzzing and 256 invariant runs with 128,000 calls per invariant.
+- Foundry — 29 tests passed after the refund-model change: 24 unit/fuzz tests and 5 invariants, each with 256 runs and 128,000 calls.
+- Foundry coverage — 80.67% lines overall and 95.28% lines for `PaymentVault.sol` with the CI `--ir-minimum` profile.
+- Contract size — `PaymentVault` runtime bytecode is 9,053 bytes, leaving 15,523 bytes below the EVM limit.
 - Browser — desktop and 390 px mobile render checks passed; primary navigation passed; 0 console errors and 0 warnings after fixes.
 
 ## Production gates
 
 1. Independent smart-contract audit and remediation.
-2. Customer-signed payment attempts that prevent merchant-controlled refund redirection.
+2. Complete the attempt-before-burn App Kit registration and recovery flow.
 3. Hardware/KMS-backed relayer key with low balance and monitoring, or remove the optional relayer.
 4. Multisig ownership, tested two-step transfers, incident runbook, and RPC redundancy.
 5. Live testnet deployment evidence, explorer verification, end-to-end CCTP transaction, and refund recovery drill.

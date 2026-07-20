@@ -534,6 +534,16 @@ footer > div:first-child {
   font-size: 12px;
   font-weight: 800;
 }
+.field-hint {
+  min-height: 42px;
+  margin: 0;
+  border: 1px solid #cbd7d2;
+  background: #fbfcfb;
+  border-radius: 9px;
+  padding: 12px 13px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .field input,
 .field textarea,
 .field select {

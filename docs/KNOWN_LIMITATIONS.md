@@ -8,6 +8,6 @@
 - App Kit and Forwarding depend on Circle and RPC availability.
 - The Arc indexer is cursor-based, paginated and idempotent, but production RPC redundancy and high-volume sharding remain pending.
 - The dashboard still contains explicitly labeled demo data and must be replaced with authenticated indexed metrics.
-- The invoice refund address is still selected during merchant invoice creation. Customer-signed payment-attempt refund ownership is not implemented yet, so the payment flow is not production-ready.
+- Customer-owned EIP-712 refund authorization is implemented in contracts and backend persistence. The App Kit attempt-before-burn registration and recovery UI are still being migrated, so real bridging remains disabled until that phase is complete.
 - Solana Devnet is intentionally deferred until the EVM flow is demonstrated reliably.
 - Receipt PDF export is represented by browser printing; a signed PDF artifact is not implemented.

@@ -33,7 +33,6 @@ type PendingImport = {
   orderId: string;
   amount: string;
   expiresAt: string;
-  refundAddress: `0x${string}`;
   description?: string;
 };
 
@@ -56,7 +55,6 @@ export default function CreateInvoicePage() {
     orderId: "ORDER-1042",
     amount: "125.00",
     hours: "24",
-    refundAddress: "",
     description: "Industrial sensor order #1042",
   });
   const expiresAt = useMemo(
@@ -128,7 +126,6 @@ export default function CreateInvoicePage() {
             orderIdBytes32,
             parseUsdc(form.amount),
             BigInt(Math.floor(expiresAt.getTime() / 1000)),
-            (form.refundAddress || address) as `0x${string}`,
             form.description ? keccak256(toBytes(form.description)) : zeroHash,
           ],
           chainId: arcTestnet.id,
@@ -145,7 +142,6 @@ export default function CreateInvoicePage() {
           orderId: form.orderId,
           amount: form.amount,
           expiresAt: expiresAt.toISOString(),
-          refundAddress: (form.refundAddress || address) as `0x${string}`,
           ...(form.description ? { description: form.description } : {}),
         };
         window.localStorage.setItem(pendingImportKey, JSON.stringify(pending));
@@ -161,7 +157,6 @@ export default function CreateInvoicePage() {
           orderId: form.orderId,
           amount: form.amount,
           expiresAt: expiresAt.toISOString(),
-          refundAddress: form.refundAddress || address,
           description: form.description,
         }),
       });
@@ -285,14 +280,10 @@ export default function CreateInvoicePage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="refund">Arc refund address</label>
-            <input
-              id="refund"
-              pattern="0x[a-fA-F0-9]{40}"
-              placeholder={address ?? "0x…"}
-              value={form.refundAddress}
-              onChange={(event) => set("refundAddress", event.target.value)}
-            />
+            <label>Customer refund address</label>
+            <p className="field-hint">
+              The customer signs and locks this address during checkout.
+            </p>
           </div>
           <div className="field full">
             <label htmlFor="description">Customer-facing description</label>

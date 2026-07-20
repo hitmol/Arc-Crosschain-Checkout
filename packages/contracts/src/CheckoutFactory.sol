@@ -32,7 +32,6 @@ contract CheckoutFactory is Ownable2Step, Pausable {
         address indexed merchant,
         address indexed vault,
         address payoutAddress,
-        address refundAddress,
         uint256 expectedAmount,
         uint16 protocolFeeBps,
         uint64 expiresAt,
@@ -56,14 +55,11 @@ contract CheckoutFactory is Ownable2Step, Pausable {
         usdc = usdc_;
     }
 
-    function createPaymentIntent(
-        bytes32 orderId,
-        uint256 expectedAmount,
-        uint64 expiresAt,
-        address refundAddress,
-        bytes32 metadataHash
-    ) external whenNotPaused returns (address vault) {
-        if (refundAddress == address(0)) revert ZeroAddress();
+    function createPaymentIntent(bytes32 orderId, uint256 expectedAmount, uint64 expiresAt, bytes32 metadataHash)
+        external
+        whenNotPaused
+        returns (address vault)
+    {
         if (expectedAmount == 0) revert InvalidAmount();
         if (expiresAt < block.timestamp + MIN_EXPIRY || expiresAt > block.timestamp + MAX_EXPIRY) {
             revert InvalidExpiry();
@@ -83,7 +79,6 @@ contract CheckoutFactory is Ownable2Step, Pausable {
                 address(this),
                 msg.sender,
                 merchant.payoutAddress,
-                refundAddress,
                 usdc,
                 feeManager.treasury(),
                 orderId,
@@ -97,15 +92,7 @@ contract CheckoutFactory is Ownable2Step, Pausable {
         vaultByOrderId[msg.sender][orderId] = vault;
         _merchantVaults[msg.sender].push(vault);
         emit PaymentIntentCreated(
-            orderId,
-            msg.sender,
-            vault,
-            merchant.payoutAddress,
-            refundAddress,
-            expectedAmount,
-            lockedFeeBps,
-            expiresAt,
-            metadataHash
+            orderId, msg.sender, vault, merchant.payoutAddress, expectedAmount, lockedFeeBps, expiresAt, metadataHash
         );
     }
 

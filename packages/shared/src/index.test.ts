@@ -3,6 +3,7 @@ import {
   formatUsdc,
   orderIdToBytes32,
   parseUsdc,
+  paymentAttemptInputSchema,
   paymentIntentInputSchema,
 } from "./index.js";
 
@@ -15,6 +16,35 @@ describe("USDC amount utilities", () => {
   it("never treats USDC as an 18-decimal application token", () => {
     expect(parseUsdc("1")).toBe(1_000_000n);
     expect(() => parseUsdc("1.0000001")).toThrow();
+  });
+});
+
+describe("payment attempt authorization", () => {
+  const attempt = {
+    attemptId: `0x${"11".repeat(32)}`,
+    invoiceVault: "0x1111111111111111111111111111111111111111",
+    orderId: `0x${"22".repeat(32)}`,
+    sourceChainId: 84532,
+    destinationChainId: 5_042_002,
+    customerAddress: "0x2222222222222222222222222222222222222222",
+    refundAddress: "0x3333333333333333333333333333333333333333",
+    destinationAmount: "1000000",
+    quotedSourceAmount: "1000000",
+    maximumSourceAmount: "1010000",
+    quoteExpiresAt: "2026-07-21T00:00:00.000Z",
+    nonce: "1",
+    attemptExpiresAt: "2026-07-21T00:05:00.000Z",
+    authorizationDigest: `0x${"33".repeat(32)}`,
+    signature: `0x${"44".repeat(65)}`,
+  };
+
+  it("rejects nonces outside Solidity uint256", () => {
+    const result = paymentAttemptInputSchema.safeParse({
+      ...attempt,
+      nonce: (2n ** 256n).toString(),
+    });
+
+    expect(result.success).toBe(false);
   });
 });
 

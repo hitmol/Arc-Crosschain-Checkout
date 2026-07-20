@@ -131,6 +131,13 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
       );
       return;
     }
+    const customerAttemptFlowReady: boolean = false;
+    if (!customerAttemptFlowReady) {
+      setError(
+        "Real bridging is temporarily disabled until the customer EIP-712 attempt is persisted and registered on Arc before any USDC burn.",
+      );
+      return;
+    }
     setBusy(true);
     setError("");
     try {

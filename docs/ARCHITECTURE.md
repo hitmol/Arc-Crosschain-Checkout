@@ -35,12 +35,30 @@ sequenceDiagram
   participant R as MerchantRegistry
   participant V as PaymentVault clone
   participant A as API/index
-  M->>F: createPaymentIntent(orderId, amount, expiry, refund)
+  M->>F: createPaymentIntent(orderId, amount, expiry)
   F->>R: merchantOf(merchant)
   F->>V: CREATE2 clone + initialize locked settings
   F-->>M: PaymentIntentCreated(vault)
   M->>A: index confirmed transaction and vault
 ```
+
+## Customer-owned payment attempt
+
+```mermaid
+sequenceDiagram
+  participant C as Customer
+  participant A as API
+  participant V as PaymentVault
+  participant P as Circle App Kit
+  C->>A: request verified quote
+  C->>C: sign EIP-712 authorization
+  C->>A: persist signed attempt
+  C->>V: registerPaymentAttempt(authorization, signature)
+  V-->>A: PaymentAttemptRegistered (indexed)
+  C->>P: approve + burn only after registration
+```
+
+The first valid attempt permanently locks the customer and Arc refund address. Expired attempts can be replaced only by the same customer/refund pair. A merchant cannot supply or redirect the refund recipient.
 
 ## Contract relationships
 

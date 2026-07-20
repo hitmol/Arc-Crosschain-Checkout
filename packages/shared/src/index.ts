@@ -29,7 +29,6 @@ export const paymentIntentInputSchema = z.object({
   orderId: orderIdSchema,
   amount: usdcAmountSchema,
   expiresAt: z.string().datetime(),
-  refundAddress: addressSchema,
   description: z.string().trim().max(280).optional(),
   metadata: z.record(z.string(), z.string().max(500)).optional(),
   vaultAddress: addressSchema.optional(),
@@ -40,9 +39,29 @@ export const paymentIntentInputSchema = z.object({
 });
 
 export const paymentAttemptInputSchema = z.object({
+  attemptId: bytes32Schema,
+  invoiceVault: addressSchema,
+  orderId: orderIdSchema,
   sourceChainId: z.union([z.literal(84532), z.literal(11155111)]),
+  destinationChainId: z.literal(5_042_002),
   customerAddress: addressSchema,
+  refundAddress: addressSchema,
+  destinationAmount: usdcAmountSchema,
   quotedSourceAmount: usdcAmountSchema,
+  maximumSourceAmount: usdcAmountSchema,
+  quoteExpiresAt: z.string().datetime(),
+  nonce: z
+    .string()
+    .regex(/^\d+$/)
+    .max(78)
+    .refine((value) => BigInt(value) <= 2n ** 256n - 1n, "Exceeds uint256"),
+  attemptExpiresAt: z.string().datetime(),
+  authorizationDigest: bytes32Schema,
+  signature: z.string().regex(/^0x[a-fA-F0-9]{130}$/),
+  registeredTransactionHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/)
+    .optional(),
   sourceTransactionHash: z
     .string()
     .regex(/^0x[a-fA-F0-9]{64}$/)

@@ -16,7 +16,7 @@ import { arcTestnet } from "viem/chains";
 import { config } from "./config.js";
 
 export const paymentIntentCreatedAbi = parseAbi([
-  "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,address refundAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)",
+  "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)",
 ]);
 
 const checkoutFactoryReadAbi = parseAbi([
@@ -41,7 +41,6 @@ export type ReconcileIntentInput = {
   orderId: string;
   amount: string;
   expiresAt: string;
-  refundAddress: Address;
   description?: string;
 };
 
@@ -107,10 +106,6 @@ export async function verifyPaymentIntentTransaction(
       throw new ReconciliationError(
         "Factory event expiry does not match request",
       );
-    if (!isAddressEqual(args.refundAddress, input.refundAddress))
-      throw new ReconciliationError(
-        "Factory event refund address does not match request",
-      );
     if (!isAddressEqual(args.payoutAddress, expectedPayoutAddress))
       throw new ReconciliationError(
         "Factory event payout does not match indexed merchant",
@@ -143,7 +138,6 @@ export async function verifyPaymentIntentTransaction(
       merchantAddress: args.merchant.toLowerCase(),
       vaultAddress: args.vault.toLowerCase(),
       payoutAddress: args.payoutAddress.toLowerCase(),
-      refundAddress: args.refundAddress.toLowerCase(),
       expectedAmount: args.expectedAmount,
       protocolFeeBps: args.protocolFeeBps,
       expiresAt: new Date(Number(args.expiresAt) * 1000),

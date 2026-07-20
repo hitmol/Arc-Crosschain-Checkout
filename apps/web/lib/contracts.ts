@@ -7,15 +7,16 @@ export const merchantRegistryAbi = parseAbi([
 ]);
 
 export const checkoutFactoryAbi = parseAbi([
-  "function createPaymentIntent(bytes32 orderId,uint256 expectedAmount,uint64 expiresAt,address refundAddress,bytes32 metadataHash) returns (address vault)",
+  "function createPaymentIntent(bytes32 orderId,uint256 expectedAmount,uint64 expiresAt,bytes32 metadataHash) returns (address vault)",
   "function predictPaymentVault(address merchant,bytes32 orderId) view returns (address)",
-  "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,address refundAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)"
+  "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)"
 ]);
 
 export const paymentVaultAbi = parseAbi([
   "function currentBalance() view returns (uint256)",
   "function amountRemaining() view returns (uint256)",
   "function paymentState() view returns (uint8)",
+  "function registerPaymentAttempt((bytes32 attemptId,uint256 sourceChainId,uint256 destinationChainId,address invoiceVault,bytes32 orderId,address payer,address refundAddress,uint256 destinationAmount,uint256 maximumSourceAmount,uint64 quoteExpiresAt,uint256 nonce,uint64 attemptExpiresAt) authorization,bytes signature)",
   "function settle()",
   "function refund()"
 ]);

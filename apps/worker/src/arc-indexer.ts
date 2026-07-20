@@ -17,10 +17,12 @@ const merchantRegistryEvents = parseAbi([
 ]);
 
 const checkoutFactoryEvents = parseAbi([
-  "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,address refundAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)",
+  "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)",
 ]);
 
 const paymentVaultEvents = parseAbi([
+  "event PaymentAttemptRegistered(bytes32 indexed attemptId,bytes32 indexed orderId,address indexed payer,address refundAddress,uint256 sourceChainId,uint256 destinationAmount,uint256 maximumSourceAmount,uint256 nonce,uint64 quoteExpiresAt,uint64 attemptExpiresAt)",
+  "event PaymentAttemptCleared(bytes32 indexed attemptId,address indexed payer)",
   "event PaymentSettled(bytes32 indexed orderId,address indexed caller,uint256 invoiceAmount,uint256 merchantAmount,uint256 protocolFee,uint256 refundedExcess)",
   "event PaymentCancelled(bytes32 indexed orderId,address indexed merchant)",
   "event PaymentRefunded(bytes32 indexed orderId,address indexed caller,address indexed refundAddress,uint256 amount)",
@@ -217,7 +219,7 @@ async function processLog(
           },
           update: {
             expectedAmount: bigintArg(args, "expectedAmount"),
-            refundAddress: addressArg(args, "refundAddress"),
+            refundAddress: null,
             payoutAddress: addressArg(args, "payoutAddress"),
             vaultAddress: addressArg(args, "vault"),
             metadataHash: hexArg(args, "metadataHash"),
@@ -230,7 +232,7 @@ async function processLog(
             orderId,
             orderIdBytes32,
             expectedAmount: bigintArg(args, "expectedAmount"),
-            refundAddress: addressArg(args, "refundAddress"),
+            refundAddress: null,
             payoutAddress: addressArg(args, "payoutAddress"),
             vaultAddress: addressArg(args, "vault"),
             metadataHash: hexArg(args, "metadataHash"),
@@ -249,7 +251,72 @@ async function processLog(
         if (!intent) return;
         merchantId = intent.merchantId;
         paymentIntentId = intent.id;
-        if (eventName === "PaymentSettled") {
+        if (eventName === "PaymentAttemptRegistered") {
+          const attemptIdentifier = hexArg(args, "attemptId");
+          const payer = addressArg(args, "payer");
+          const refundAddress = addressArg(args, "refundAddress");
+          const sourceChainId = Number(bigintArg(args, "sourceChainId"));
+          const destinationAmount = bigintArg(args, "destinationAmount");
+          const maximumSourceAmount = bigintArg(args, "maximumSourceAmount");
+          const quoteExpiresAt = new Date(
+            Number(bigintArg(args, "quoteExpiresAt")) * 1000,
+          );
+          const nonce = bigintArg(args, "nonce");
+          const attemptExpiresAt = new Date(
+            Number(bigintArg(args, "attemptExpiresAt")) * 1000,
+          );
+          await transaction.paymentAttempt.upsert({
+            where: { attemptIdentifier },
+            update: {
+              active: true,
+              vaultAddress: contractAddress,
+              orderIdBytes32: hexArg(args, "orderId"),
+              sourceChainId,
+              destinationChainId: options.chainId,
+              customerAddress: payer,
+              refundAddress,
+              destinationAmount,
+              quotedSourceAmount: maximumSourceAmount,
+              maximumSourceAmount,
+              quoteExpiresAt,
+              nonce,
+              attemptExpiresAt,
+              status: "REGISTERED",
+              registeredTransactionHash: log.transactionHash.toLowerCase(),
+            },
+            create: {
+              attemptIdentifier,
+              active: true,
+              vaultAddress: contractAddress,
+              orderIdBytes32: hexArg(args, "orderId"),
+              sourceChainId,
+              destinationChainId: options.chainId,
+              customerAddress: payer,
+              refundAddress,
+              destinationAmount,
+              quotedSourceAmount: maximumSourceAmount,
+              maximumSourceAmount,
+              quoteExpiresAt,
+              nonce,
+              attemptExpiresAt,
+              registeredTransactionHash: log.transactionHash.toLowerCase(),
+              status: "REGISTERED",
+              paymentIntentId: intent.id,
+            },
+          });
+          await transaction.paymentIntent.update({
+            where: { id: intent.id },
+            data: { refundAddress },
+          });
+        } else if (eventName === "PaymentAttemptCleared") {
+          await transaction.paymentAttempt.updateMany({
+            where: {
+              attemptIdentifier: hexArg(args, "attemptId"),
+              paymentIntentId: intent.id,
+            },
+            data: { active: false, status: "EXPIRED" },
+          });
+        } else if (eventName === "PaymentSettled") {
           await transaction.paymentIntent.update({
             where: { id: intent.id },
             data: {

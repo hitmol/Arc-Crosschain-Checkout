@@ -15,13 +15,18 @@ contract CheckoutTest is Test {
     CheckoutFactory factory;
     MockUSDC usdc;
 
-    address merchant = makeAddr("merchant");
+    uint256 merchantKey = 0xBEEF;
+    address merchant;
     address payout = makeAddr("payout");
     address refundAddress = makeAddr("refund");
     address treasury = makeAddr("treasury");
-    address payer = makeAddr("payer");
+    uint256 payerKey = 0xA11CE;
+    address payer;
 
     function setUp() public {
+        vm.chainId(5_042_002);
+        merchant = vm.addr(merchantKey);
+        payer = vm.addr(payerKey);
         usdc = new MockUSDC();
         registry = new MerchantRegistry(address(this));
         fees = new FeeManager(address(this), treasury, 100);
@@ -34,13 +39,54 @@ contract CheckoutTest is Test {
         usdc.mint(payer, 1_000_000_000);
     }
 
-    function _create(bytes32 orderId, uint256 amount) internal returns (PaymentVault vault) {
+    function _createUnregistered(bytes32 orderId, uint256 amount) internal returns (PaymentVault vault) {
         vm.prank(merchant);
         vault = PaymentVault(
-            factory.createPaymentIntent(
-                orderId, amount, uint64(block.timestamp + 1 hours), refundAddress, keccak256("invoice")
-            )
+            factory.createPaymentIntent(orderId, amount, uint64(block.timestamp + 1 hours), keccak256("invoice"))
         );
+    }
+
+    function _create(bytes32 orderId, uint256 amount) internal returns (PaymentVault vault) {
+        vault = _createUnregistered(orderId, amount);
+        _register(vault, payerKey, payer, refundAddress, 1, keccak256(abi.encode(orderId, "attempt")));
+    }
+
+    function _authorization(
+        PaymentVault vault,
+        address paymentPayer,
+        address paymentRefundAddress,
+        uint256 nonce,
+        bytes32 attemptId
+    ) internal view returns (PaymentVault.PaymentAuthorization memory) {
+        return PaymentVault.PaymentAuthorization({
+            attemptId: attemptId,
+            sourceChainId: vault.BASE_SEPOLIA_CHAIN_ID(),
+            destinationChainId: vault.ARC_CHAIN_ID(),
+            invoiceVault: address(vault),
+            orderId: vault.orderId(),
+            payer: paymentPayer,
+            refundAddress: paymentRefundAddress,
+            destinationAmount: vault.expectedAmount(),
+            maximumSourceAmount: vault.expectedAmount() + 5_000_000,
+            quoteExpiresAt: uint64(block.timestamp + 5 minutes),
+            nonce: nonce,
+            attemptExpiresAt: uint64(block.timestamp + 10 minutes)
+        });
+    }
+
+    function _register(
+        PaymentVault vault,
+        uint256 signerKey,
+        address paymentPayer,
+        address paymentRefundAddress,
+        uint256 nonce,
+        bytes32 attemptId
+    ) internal {
+        PaymentVault.PaymentAuthorization memory authorization =
+            _authorization(vault, paymentPayer, paymentRefundAddress, nonce, attemptId);
+        bytes32 digest = vault.paymentAuthorizationDigest(authorization);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
+        vault.registerPaymentAttempt(authorization, abi.encodePacked(r, s, v));
     }
 
     function _fund(PaymentVault vault, uint256 amount) internal {
@@ -71,7 +117,7 @@ contract CheckoutTest is Test {
         assertEq(address(vault), predicted);
         vm.expectRevert(CheckoutFactory.DuplicateOrderId.selector);
         vm.prank(merchant);
-        factory.createPaymentIntent(orderId, 1, uint64(block.timestamp + 1 hours), refundAddress, bytes32(0));
+        factory.createPaymentIntent(orderId, 1, uint64(block.timestamp + 1 hours), bytes32(0));
     }
 
     function testOrderIdsAreScopedPerMerchant() public {
@@ -83,9 +129,8 @@ contract CheckoutTest is Test {
 
         PaymentVault firstVault = _create(orderId, 100_000_000);
         vm.prank(secondMerchant);
-        address secondVault = factory.createPaymentIntent(
-            orderId, 100_000_000, uint64(block.timestamp + 1 hours), refundAddress, keccak256("invoice")
-        );
+        address secondVault =
+            factory.createPaymentIntent(orderId, 100_000_000, uint64(block.timestamp + 1 hours), keccak256("invoice"));
 
         assertNotEq(address(firstVault), secondVault);
         assertEq(factory.vaultByOrderId(merchant, orderId), address(firstVault));
@@ -95,8 +140,135 @@ contract CheckoutTest is Test {
     function testImplementationCannotBeInitialized() public {
         vm.expectRevert(PaymentVault.AlreadyInitialized.selector);
         implementation.initialize(
-            address(this), merchant, payout, refundAddress, address(usdc), treasury, bytes32(0), 1, 0, 1, 2, bytes32(0)
+            address(this), merchant, payout, address(usdc), treasury, bytes32(0), 1, 0, 1, 2, bytes32(0)
         );
+    }
+
+    function testCustomerAuthorizationLocksPayerAndRefundAddress() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-1"), 100_000_000);
+        _register(vault, payerKey, payer, refundAddress, 7, keccak256("attempt-1"));
+
+        assertEq(vault.payer(), payer);
+        assertEq(vault.payerRefundAddress(), refundAddress);
+        assertTrue(vault.attemptLocked());
+        assertTrue(vault.usedNonces(payer, 7));
+    }
+
+    function testRejectsInvalidSignerAndMerchantSignature() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-2"), 100_000_000);
+        PaymentVault.PaymentAuthorization memory authorization =
+            _authorization(vault, payer, refundAddress, 8, keccak256("attempt-2"));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(merchantKey, vault.paymentAuthorizationDigest(authorization));
+
+        vm.expectRevert(PaymentVault.InvalidSigner.selector);
+        vault.registerPaymentAttempt(authorization, abi.encodePacked(r, s, v));
+    }
+
+    function testRejectsWrongVaultChainAmountAndSourceChain() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-3"), 100_000_000);
+        PaymentVault.PaymentAuthorization memory authorization =
+            _authorization(vault, payer, refundAddress, 9, keccak256("attempt-3"));
+
+        authorization.invoiceVault = address(implementation);
+        _expectInvalidAuthorization(vault, authorization, payerKey);
+        authorization.invoiceVault = address(vault);
+        authorization.destinationChainId = 1;
+        _expectInvalidAuthorization(vault, authorization, payerKey);
+        authorization.destinationChainId = vault.ARC_CHAIN_ID();
+        authorization.destinationAmount += 1;
+        _expectInvalidAuthorization(vault, authorization, payerKey);
+        authorization.destinationAmount = vault.expectedAmount();
+        authorization.sourceChainId = 1;
+        _expectRevertWithSignature(vault, authorization, payerKey, PaymentVault.UnsupportedSourceChain.selector);
+    }
+
+    function testRejectsExpiredAuthorization() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-4"), 100_000_000);
+        PaymentVault.PaymentAuthorization memory authorization =
+            _authorization(vault, payer, refundAddress, 10, keccak256("attempt-4"));
+        authorization.quoteExpiresAt = uint64(block.timestamp - 1);
+        _expectRevertWithSignature(vault, authorization, payerKey, PaymentVault.AuthorizationExpired.selector);
+    }
+
+    function testRejectsExecutionOnWrongDestinationChain() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-WRONG-CHAIN"), 100_000_000);
+        vm.chainId(1);
+        PaymentVault.PaymentAuthorization memory authorization =
+            _authorization(vault, payer, refundAddress, 20, keccak256("attempt-wrong-chain"));
+        _expectRevertWithSignature(vault, authorization, payerKey, PaymentVault.InvalidAuthorization.selector);
+    }
+
+    function testNonceAndAttemptCannotReplay() public {
+        PaymentVault first = _createUnregistered(keccak256("ATTEMPT-5A"), 100_000_000);
+        _register(first, payerKey, payer, refundAddress, 11, keccak256("attempt-5"));
+        vm.warp(block.timestamp + 11 minutes);
+        PaymentVault.PaymentAuthorization memory replayedNonce =
+            _authorization(first, payer, refundAddress, 11, keccak256("attempt-5-new"));
+        _expectRevertWithSignature(first, replayedNonce, payerKey, PaymentVault.NonceAlreadyUsed.selector);
+
+        PaymentVault.PaymentAuthorization memory replayedAttempt =
+            _authorization(first, payer, refundAddress, 12, keccak256("attempt-5"));
+        _expectRevertWithSignature(first, replayedAttempt, payerKey, PaymentVault.AttemptAlreadyUsed.selector);
+    }
+
+    function testActiveAttemptCannotBeReplaced() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-6"), 100_000_000);
+        _register(vault, payerKey, payer, refundAddress, 13, keccak256("attempt-6"));
+        PaymentVault.PaymentAuthorization memory replacement =
+            _authorization(vault, payer, refundAddress, 14, keccak256("attempt-6-replacement"));
+        _expectRevertWithSignature(vault, replacement, payerKey, PaymentVault.ActivePaymentAttempt.selector);
+    }
+
+    function testSecondPayerAndRefundAddressCannotTakeOver() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-7"), 100_000_000);
+        _register(vault, payerKey, payer, refundAddress, 15, keccak256("attempt-7"));
+        vm.warp(block.timestamp + 11 minutes);
+
+        uint256 attackerKey = 0xB0B;
+        address attacker = vm.addr(attackerKey);
+        PaymentVault.PaymentAuthorization memory takeover =
+            _authorization(vault, attacker, attacker, 1, keccak256("takeover"));
+        _expectRevertWithSignature(vault, takeover, attackerKey, PaymentVault.PayerLocked.selector);
+
+        PaymentVault.PaymentAuthorization memory redirect =
+            _authorization(vault, payer, merchant, 16, keccak256("redirect"));
+        _expectRevertWithSignature(vault, redirect, payerKey, PaymentVault.PayerLocked.selector);
+    }
+
+    function testPayerCanClearAndReplaceExpiredAttemptWithoutChangingRefund() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-8"), 100_000_000);
+        _register(vault, payerKey, payer, refundAddress, 17, keccak256("attempt-8"));
+        vm.warp(block.timestamp + 11 minutes);
+        vm.prank(payer);
+        vault.clearExpiredPaymentAttempt();
+        assertEq(vault.activeAttemptId(), bytes32(0));
+        assertEq(vault.payerRefundAddress(), refundAddress);
+
+        _register(vault, payerKey, payer, refundAddress, 18, keccak256("attempt-8-replacement"));
+        assertEq(vault.activeAttemptId(), keccak256("attempt-8-replacement"));
+    }
+
+    function testCrossInvoiceSignatureReplayFails() public {
+        PaymentVault first = _createUnregistered(keccak256("ATTEMPT-9A"), 100_000_000);
+        PaymentVault second = _createUnregistered(keccak256("ATTEMPT-9B"), 100_000_000);
+        PaymentVault.PaymentAuthorization memory authorization =
+            _authorization(first, payer, refundAddress, 19, keccak256("attempt-9"));
+        bytes32 digest = first.paymentAuthorizationDigest(authorization);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(payerKey, digest);
+        authorization.invoiceVault = address(second);
+        authorization.orderId = second.orderId();
+        vm.expectRevert(PaymentVault.InvalidSigner.selector);
+        second.registerPaymentAttempt(authorization, abi.encodePacked(r, s, v));
+    }
+
+    function testCannotSettleOrRefundWithoutCustomerAttempt() public {
+        PaymentVault vault = _createUnregistered(keccak256("ATTEMPT-10"), 100_000_000);
+        _fund(vault, 100_000_000);
+        vm.expectRevert(PaymentVault.InvalidState.selector);
+        vault.settle();
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.expectRevert(PaymentVault.InvalidState.selector);
+        vault.refund();
     }
 
     function testPartialFundingAndExactSettlement() public {
@@ -161,9 +333,7 @@ contract CheckoutTest is Test {
         factory.pauseCreation();
         vm.expectRevert();
         vm.prank(merchant);
-        factory.createPaymentIntent(
-            keccak256("ORDER-8"), 10_000_000, uint64(block.timestamp + 1 hours), refundAddress, bytes32(0)
-        );
+        factory.createPaymentIntent(keccak256("ORDER-8"), 10_000_000, uint64(block.timestamp + 1 hours), bytes32(0));
         _fund(vault, 10_000_000);
         vault.settle();
         assertEq(uint8(vault.paymentState()), uint8(PaymentVault.PaymentState.Settled));
@@ -193,5 +363,24 @@ contract CheckoutTest is Test {
         vault.settle();
         uint256 afterBalance = usdc.balanceOf(payout) + usdc.balanceOf(treasury) + usdc.balanceOf(refundAddress);
         assertEq(afterBalance - before, amount + excess);
+    }
+
+    function _expectInvalidAuthorization(
+        PaymentVault vault,
+        PaymentVault.PaymentAuthorization memory authorization,
+        uint256 signerKey
+    ) internal {
+        _expectRevertWithSignature(vault, authorization, signerKey, PaymentVault.InvalidAuthorization.selector);
+    }
+
+    function _expectRevertWithSignature(
+        PaymentVault vault,
+        PaymentVault.PaymentAuthorization memory authorization,
+        uint256 signerKey,
+        bytes4 selector
+    ) internal {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, vault.paymentAuthorizationDigest(authorization));
+        vm.expectRevert(selector);
+        vault.registerPaymentAttempt(authorization, abi.encodePacked(r, s, v));
     }
 }

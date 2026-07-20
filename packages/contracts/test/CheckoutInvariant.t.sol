@@ -44,8 +44,12 @@ contract CheckoutInvariantTest is StdInvariant, Test {
     address payout = makeAddr("invariantPayout");
     address refundAddress = makeAddr("invariantRefund");
     address treasury = makeAddr("invariantTreasury");
+    uint256 payerKey = 0xC0FFEE;
+    address payer;
 
     function setUp() public {
+        vm.chainId(5_042_002);
+        payer = vm.addr(payerKey);
         usdc = new MockUSDC();
         MerchantRegistry registry = new MerchantRegistry(address(this));
         FeeManager fees = new FeeManager(address(this), treasury, 100);
@@ -58,9 +62,25 @@ contract CheckoutInvariantTest is StdInvariant, Test {
         vm.prank(merchant);
         vault = PaymentVault(
             factory.createPaymentIntent(
-                keccak256("INVARIANT-ORDER"), 100_000_000, uint64(block.timestamp + 30 days), refundAddress, bytes32(0)
+                keccak256("INVARIANT-ORDER"), 100_000_000, uint64(block.timestamp + 30 days), bytes32(0)
             )
         );
+        PaymentVault.PaymentAuthorization memory authorization = PaymentVault.PaymentAuthorization({
+            attemptId: keccak256("INVARIANT-ATTEMPT"),
+            sourceChainId: vault.BASE_SEPOLIA_CHAIN_ID(),
+            destinationChainId: vault.ARC_CHAIN_ID(),
+            invoiceVault: address(vault),
+            orderId: vault.orderId(),
+            payer: payer,
+            refundAddress: refundAddress,
+            destinationAmount: vault.expectedAmount(),
+            maximumSourceAmount: 110_000_000,
+            quoteExpiresAt: uint64(block.timestamp + 1 days),
+            nonce: 1,
+            attemptExpiresAt: uint64(block.timestamp + 2 days)
+        });
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(payerKey, vault.paymentAuthorizationDigest(authorization));
+        vault.registerPaymentAttempt(authorization, abi.encodePacked(r, s, v));
         handler = new CheckoutHandler(usdc, vault);
         targetContract(address(handler));
     }
@@ -74,9 +94,28 @@ contract CheckoutInvariantTest is StdInvariant, Test {
     function invariantInvoiceConfigurationDoesNotChange() public view {
         assertEq(vault.merchant(), merchant);
         assertEq(vault.payoutAddress(), payout);
-        assertEq(vault.refundAddress(), refundAddress);
+        assertEq(vault.payer(), payer);
+        assertEq(vault.payerRefundAddress(), refundAddress);
+        assertTrue(vault.attemptLocked());
         assertEq(vault.treasury(), treasury);
         assertEq(vault.expectedAmount(), 100_000_000);
         assertEq(vault.protocolFeeBps(), 100);
+    }
+
+    function invariantNonceCannotBeReused() public view {
+        assertTrue(vault.usedNonces(payer, 1));
+        assertTrue(vault.usedAttemptIds(keccak256("INVARIANT-ATTEMPT")));
+    }
+
+    function invariantMerchantNeverReceivesCustomerRefundFunds() public view {
+        assertEq(usdc.balanceOf(merchant), 0);
+        assertEq(vault.payerRefundAddress(), refundAddress);
+    }
+
+    function invariantTerminalStateNeverReturnsToPayable() public view {
+        PaymentVault.PaymentState state = vault.paymentState();
+        if (state == PaymentVault.PaymentState.Settled || state == PaymentVault.PaymentState.Refunded) {
+            assertFalse(vault.canSettle());
+        }
     }
 }

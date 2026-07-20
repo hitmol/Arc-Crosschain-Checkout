@@ -30,7 +30,7 @@ async function main() {
       orderIdBytes32: `0x${Buffer.from("DEMO-1042").toString("hex").padEnd(64, "0")}`,
       expectedAmount: 125_000_000n,
       fundedAmount: 0n,
-      refundAddress: merchantAddress,
+      refundAddress: null,
       payoutAddress,
       vaultAddress: demoVault("DEMO-1042"),
       description: "Industrial sensor order #1042",

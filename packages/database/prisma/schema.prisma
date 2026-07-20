@@ -20,6 +20,7 @@ enum PaymentStatus {
 
 enum AttemptStatus {
   QUOTED
+  REGISTERED
   APPROVING
   BURN_SUBMITTED
   SOURCE_CONFIRMED
@@ -28,6 +29,7 @@ enum AttemptStatus {
   SETTLING
   SETTLED
   FAILED
+  EXPIRED
 }
 
 enum WebhookDeliveryStatus {
@@ -59,7 +61,7 @@ model PaymentIntent {
   orderIdBytes32            String
   expectedAmount            BigInt
   fundedAmount              BigInt             @default(0)
-  refundAddress             String
+  refundAddress             String?
   payoutAddress             String
   vaultAddress              String?            @unique
   metadataHash              String?
@@ -93,13 +95,27 @@ model PaymentIntent {
 
 model PaymentAttempt {
   id                    String        @id @default(uuid())
+  attemptIdentifier     String?       @unique
+  active                Boolean       @default(true)
+  vaultAddress          String?
+  orderIdBytes32        String?
   sourceChainId         Int
+  destinationChainId    Int           @default(5042002)
   customerAddress       String
+  refundAddress         String?
+  destinationAmount     BigInt?
   quotedSourceAmount    BigInt
+  maximumSourceAmount   BigInt?
   maxFee                BigInt?
+  quoteExpiresAt        DateTime?
+  nonce                 BigInt?
+  attemptExpiresAt      DateTime?
+  authorizationDigest   String?
+  signature             String?
+  registeredTransactionHash String?
   status                AttemptStatus @default(QUOTED)
-  sourceTransactionHash String?
-  cctpMessageId         String?
+  sourceTransactionHash String?       @unique
+  cctpMessageId         String?       @unique
   errorCode             String?
   errorMessage          String?
   createdAt             DateTime      @default(now())
@@ -108,6 +124,7 @@ model PaymentAttempt {
   paymentIntent         PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
 
   @@index([status, updatedAt])
+  @@index([paymentIntentId, active])
 }
 
 model ChainTransaction {

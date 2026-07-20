@@ -101,7 +101,7 @@ Import a deployer into Foundry's encrypted keystore, fund it with Arc Testnet US
 
 The database is an index; Arc contract state wins. Existing vault settlement and refunds cannot be paused. Fees and payout addresses are snapshotted at invoice creation. Webhooks use encrypted-at-rest secrets, raw-body HMAC SHA-256 signatures, replay-resistant timestamps, and bounded retries.
 
-This is testnet software, is not audited, and does not provide automatic crosschain refunds. Refunds are paid to the invoice's Arc refund address. Merchant mutations use short-lived wallet-signature sessions or hashed, scoped and revocable server API keys. Customer-owned refund authorization, production-grade RPC redundancy, external monitoring, and a professional contract audit remain required. Read [SECURITY.md](SECURITY.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
+This is testnet software, is not audited, and does not provide automatic crosschain refunds. Before a burn, the customer signs an EIP-712 payment attempt that permanently locks the payer and customer-controlled Arc refund address; the merchant cannot select or replace it. Merchant mutations use short-lived wallet-signature sessions or hashed, scoped and revocable server API keys. Complete App Kit recovery, production-grade RPC redundancy, external monitoring, and a professional contract audit remain required. Read [SECURITY.md](SECURITY.md) and [known limitations](docs/KNOWN_LIMITATIONS.md).
 
 ## Links
 

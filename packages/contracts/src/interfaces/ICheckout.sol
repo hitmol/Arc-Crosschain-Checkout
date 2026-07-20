@@ -23,7 +23,6 @@ interface IPaymentVault {
         address factory_,
         address merchant_,
         address payoutAddress_,
-        address refundAddress_,
         address usdc_,
         address treasury_,
         bytes32 orderId_,
