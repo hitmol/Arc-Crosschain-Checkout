@@ -7,12 +7,12 @@ Run PostgreSQL, migrations, seed, and `pnpm dev` as described in local developme
 ## Live flow
 
 1. Open merchant onboarding, connect the merchant wallet, switch to Arc Testnet, and register.
-2. Create an invoice with a unique order ID, USDC amount, one-hour expiry, and Arc refund address.
+2. Create an invoice with a unique order ID, USDC amount, and one-hour expiry. Invoice creation does not choose the customer refund recipient.
 3. Copy the public URL and show the deterministic vault on ArcScan.
 4. Open the link in a customer session and connect a Base Sepolia wallet.
 5. Obtain test USDC from the Circle faucet and Base Sepolia ETH from an official faucet before filming.
 6. Request the live Circle quote; narrate merchant amount, protocol fee, forwarding fee, and total source spend.
-7. Confirm the customer-owned Arc refund address, sign the payment authorization, register it on Arc, then approve and pay. Show the source burn transaction, attestation state, `forwardTxHash`, and verified Arc mint.
+7. As the customer, choose and confirm the Arc refund address, sign the EIP-712 payment authorization, register it on Arc, then approve and pay. Show the source burn transaction, attestation state, `forwardTxHash`, and verified Arc mint.
 8. Let the worker settle or click **Finalize on Arc** if the worker key is absent.
 9. Show the Arc settlement receipt, merchant balance, dashboard row, and signed webhook delivery.
 

@@ -7,7 +7,7 @@ Scope: Solidity contracts, API, worker, web application, database schema, depend
 
 No critical or high-severity findings were identified in this implementation review. The merchant-controlled refund finding is resolved by customer-signed EIP-712 payment attempts. The contracts compile and pass unit, fuzz and stateful invariant tests. Static secret/dangerous-pattern scanning passed. The production dependency audit reports no critical, high, or moderate advisories; one low-severity transitive advisory remains because the patched `elliptic` version named by the advisory is not published to npm.
 
-This is still unaudited testnet software. A production launch remains blocked on independent contract review, complete attempt-before-burn UI/CCTP validation, deployment verification and real transaction evidence.
+This is still unaudited testnet software. The attempt-before-burn UI, reload recovery, and receipt-based CCTP validation are implemented, but a production launch remains blocked on independent contract review, final deployment verification, operational infrastructure, and real transaction evidence.
 
 ## Open findings
 
@@ -40,6 +40,8 @@ This is still unaudited testnet software. A production launch remains blocked on
 - API mutation payloads are validated, bodies are limited to 64 KiB, rate limits are enabled, and payment-intent creation requires idempotency keys (`apps/api/src/app.ts:70-105`, `apps/api/src/app.ts:171-236`).
 - Demo mode now defaults off, cannot run under `NODE_ENV=production`, and non-demo API/worker processes fail closed without required secrets (`apps/api/src/config.ts:27-36`, `apps/worker/src/worker.ts:52-56`).
 - CSP, frame blocking, restrictive source lists, and production removal of `unsafe-eval` are set in `apps/web/proxy.ts`.
+- The production CSP derives the configured API origin from `NEXT_PUBLIC_API_URL`; the deployment environment validator rejects missing or unsafe production URLs.
+- Playwright exercises merchant wallet login, invoice creation, attempt creation, a mocked CCTP lifecycle, settlement, the authenticated dashboard, and the verified receipt.
 - Patched transitive versions of `uuid` and `postcss` are locked in `pnpm-workspace.yaml:5`; the application was rebuilt after the overrides.
 
 ## Verification evidence
@@ -57,7 +59,7 @@ This is still unaudited testnet software. A production launch remains blocked on
 ## Production gates
 
 1. Independent smart-contract audit and remediation.
-2. Complete the attempt-before-burn App Kit registration and recovery flow.
+2. Execute and independently verify the complete Base Sepolia to Arc testnet path, including App Kit recovery and a customer refund drill.
 3. Hardware/KMS-backed relayer key with low balance and monitoring, or remove the optional relayer.
 4. Multisig ownership, tested two-step transfers, incident runbook, and RPC redundancy.
 5. Live testnet deployment evidence, explorer verification, end-to-end CCTP transaction, and refund recovery drill.

@@ -42,10 +42,14 @@ USDC, TokenMessengerV2, MessageTransmitterV2, TokenMinterV2, and Forwarding Serv
 - Deterministic per-invoice EIP-1167 vaults
 - Live crosschain fee quoting and gross-up
 - Resumable browser and backend payment state
-- Arc balance/state reconciliation
+- Customer-owned EIP-712 refund authorization before any burn
+- Raw CCTP V2 message and Arc receipt validation
+- Restart-safe finalized Arc indexing and atomic settlement claims
+- Authenticated live-data dashboard and verified downloadable receipts
 - Permissionless settlement and timeout refunds
-- Encrypted-secret, HMAC-signed webhooks
+- Transactional, ordered, encrypted-secret HMAC-signed webhook outbox
 - Typed TypeScript merchant SDK
+- Mocked Playwright checkout-to-receipt E2E coverage
 
 ## Deployment evidence
 
@@ -53,4 +57,4 @@ Pending credentials. No address, hash, live URL, or transaction is claimed until
 
 ## Production roadmap
 
-Security audit, mainnet configuration, more source chains, merchant authentication, compliance integrations, automatic crosschain refunds, accounting integrations, checkout plugins, multi-currency invoices, and reliability monitoring.
+Independent security audit, mainnet configuration, more source chains, compliance integrations, automatic crosschain refunds, accounting integrations, checkout plugins, multi-currency invoices, RPC redundancy, and production reliability monitoring.

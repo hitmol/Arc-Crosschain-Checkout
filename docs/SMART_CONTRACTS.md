@@ -14,10 +14,12 @@ Uses OpenZeppelin `Clones.cloneDeterministic` with `keccak256(abi.encode(merchan
 
 ## PaymentVault
 
-The implementation disables initialization in its constructor; clone storage starts uninitialized. OpenZeppelin EIP-712 and ECDSA verify customer payment attempts. The authorization binds both chains, the vault, order, payer, refund address, amounts, quote expiry, nonce and attempt expiry. The first authorization permanently locks the payer/refund pair; replacement attempts require the same pair and fresh replay-protected identifiers.
+The implementation disables initialization in its constructor; clone storage starts uninitialized. OpenZeppelin EIP-712 and ECDSA verify customer payment attempts. The authorization binds both chains, the vault, order, payer, refund address, amounts, quote expiry, nonce and attempt expiry. One active attempt is supported at a time. The first authorization permanently locks the payer/refund pair; replacement attempts are possible only after expiry or explicit clearing and require the same pair plus fresh replay-protected identifiers.
 
 State is derived from terminal state plus live USDC balance. Anyone may settle a sufficiently funded, unexpired vault after customer authorization. Effects precede SafeERC20 transfers. Timeout and cancellation refunds are permissionless and pay only the customer-authorized Arc address.
 
 Overpayment is returned during settlement. USDC sent after settlement can be swept only to that same refund address. Unsupported-token recovery cannot select USDC.
+
+`PaymentAttemptRegistered`, `PaymentAttemptCleared`, settlement, cancellation, refund, and excess events are indexed as authoritative Arc lifecycle evidence. Terminal states cannot return to a payable state, and pausing the factory cannot disable settlement or refund of existing vaults.
 
 Application accounting always uses the Arc USDC ERC-20 interface at `0x3600000000000000000000000000000000000000` with six decimals. Native gas uses 18 decimals only in RPC gas contexts.

@@ -6,6 +6,8 @@ Merchants should not need to integrate separate bridges, destination gas flows, 
 
 > Status: complete local/testnet-ready MVP. Arc Testnet deployment and real transaction evidence are pending deployer credentials and funded testnet wallets. The contracts have not been audited.
 
+The authenticated merchant dashboard, verified receipt route, reload-safe checkout recovery, transactional webhook outbox, and mocked browser E2E flow are implemented. Live URLs and explorer evidence remain intentionally unpublished until the final contracts and services are verifiably deployed.
+
 ## How it works
 
 ```mermaid
@@ -79,8 +81,10 @@ pnpm typecheck
 pnpm test
 pnpm test:contracts
 pnpm --filter @arc-checkout/contracts coverage
+pnpm test:e2e
 pnpm build
 pnpm security:scan
+pnpm audit --audit-level high
 ```
 
 Coverage is generated in CI; no percentage is claimed until the command has run in the target environment.
@@ -106,7 +110,9 @@ This is testnet software, is not audited, and does not provide automatic crossch
 ## Links
 
 - Live demo: pending deployment credentials
+- API health: pending live infrastructure
 - Demo video: pending real testnet transaction recording
+- [Transaction evidence status](docs/TRANSACTION_EVIDENCE.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Hackathon submission](docs/HACKATHON_SUBMISSION.md)
 - [Three-minute video script](docs/VIDEO_SCRIPT.md)

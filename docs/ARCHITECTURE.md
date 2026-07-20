@@ -26,6 +26,8 @@ flowchart TB
 
 The factory event and vault state are authoritative. PostgreSQL accelerates queries and records attempts, delivery state, and index cursors but cannot override Arc.
 
+The merchant dashboard reads authenticated, merchant-scoped projections from PostgreSQL. Public receipt pages are assembled from the indexed invoice, verified source receipt, parsed Circle message, and finalized Arc events; missing evidence stays `null` rather than being inferred.
+
 ## Invoice creation
 
 ```mermaid
@@ -79,6 +81,7 @@ classDiagram
 - Forwarding removes destination-mint signer and gas requirements.
 - The worker treats source receipts, raw CCTP messages, and Arc USDC logs as the settlement evidence; an Iris `forwardTxHash` alone is insufficient.
 - Webhook delivery begins only after onchain-derived state changes.
+- API and worker health checks include database connectivity; worker health also checks Arc RPC, Circle fee access, cursor progress, and indexer lag.
 
 ## Transactional webhook outbox
 

@@ -10,11 +10,11 @@
 
 ## 0:40–1:05 — Create invoice
 
-Connect the merchant wallet on Arc Testnet. Enter `ORDER-1042`, `125.00 USDC`, one-hour expiry, and refund address. Submit. Show the factory transaction, emitted vault address, payment URL, and QR code.
+Connect the merchant wallet on Arc Testnet. Enter `ORDER-1042`, `125.00 USDC`, and a one-hour expiry. Submit. Show the factory transaction, emitted vault address, payment URL, and QR code. Explain that the merchant cannot choose the customer's refund recipient.
 
 ## 1:05–1:50 — Customer payment
 
-Open the payment link. Connect Base Sepolia. Explain merchant amount, live Circle protocol fee, forwarding fee, buffer, and total source spend. Approve and submit the real CCTP V2 transfer. Show the Base explorer burn hash.
+Open the payment link. Connect Base Sepolia. Explain merchant amount, live Circle protocol fee, forwarding fee, buffer, and total source spend. Choose the customer-owned Arc refund address, sign and register the EIP-712 attempt, then approve and submit the real CCTP V2 transfer. Show the attempt registration and Base explorer burn hashes.
 
 ## 1:50–2:15 — Crosschain progress
 
