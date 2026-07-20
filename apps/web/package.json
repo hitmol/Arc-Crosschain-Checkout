@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint app components lib e2e/checkout.spec.ts playwright.config.ts proxy.ts --max-warnings=0",
+    "lint": "eslint app components lib e2e/checkout.spec.ts playwright.config.ts vitest.config.ts proxy.ts --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "node node_modules/@playwright/test/cli.js test"
