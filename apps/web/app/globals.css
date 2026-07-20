@@ -719,6 +719,47 @@ footer > div:first-child {
 .payment-actions .button {
   width: 100%;
 }
+.recovery-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.recovery-actions .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.recovery-panel {
+  display: grid;
+  gap: 0;
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f6faf8;
+}
+.recovery-panel .section-kicker {
+  margin-bottom: 7px;
+}
+.recovery-panel > div:not(.section-kicker) {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.recovery-panel > div:last-child {
+  border-bottom: 0;
+}
+.recovery-panel span {
+  color: var(--muted);
+}
+.recovery-panel strong {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 .chain-choice {
   display: flex;
   gap: 10px;
@@ -735,6 +776,10 @@ footer > div:first-child {
 .chain-choice button.selected {
   border-color: var(--green);
   box-shadow: 0 0 0 2px #17705620;
+}
+.chain-choice button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 .quote-box {
   background: #f5f9f7;
@@ -1089,6 +1134,9 @@ footer > div:first-child {
     grid-template-columns: 1fr 1fr;
   }
   .pay-layout {
+    grid-template-columns: 1fr;
+  }
+  .recovery-actions {
     grid-template-columns: 1fr;
   }
   .network-strip {

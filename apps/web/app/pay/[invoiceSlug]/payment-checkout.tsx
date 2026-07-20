@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AppKit, type BridgeResult } from "@circle-fin/app-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
@@ -19,8 +21,14 @@ import {
 } from "wagmi";
 import { arcTestnet, baseSepolia, sepolia } from "viem/chains";
 import { orderIdToBytes32, parseUsdc } from "@arc-checkout/shared";
+import { chainsById } from "@arc-checkout/chain-config";
 import { apiFetch, compactAddress } from "@/lib/api";
 import { paymentVaultAbi } from "@/lib/contracts";
+import {
+  isPermanentAttemptFailure,
+  recoveryStep,
+  refundIsPermitted,
+} from "@/lib/payment-recovery";
 import { WalletButton } from "@/components/wallet-button";
 
 type Invoice = {
@@ -34,6 +42,8 @@ type Invoice = {
   vaultAddress?: string;
   status: string;
   mode: string;
+  arcMintTransactionHash?: string | null;
+  settlementTransactionHash?: string | null;
   merchant: { displayName?: string; payoutAddress: string };
 };
 type Quote = {
@@ -54,15 +64,24 @@ type Quote = {
 };
 type StoredPayment = {
   step: number;
+  invoiceId?: string;
   apiAttemptId?: string;
   clientSecret?: string;
+  attemptStatus?: string;
+  customerAddress?: string;
+  refundAddress?: string;
+  quoteExpiresAt?: string;
   sourceChainId?: number;
   registeredTransactionHash?: string;
   sourceTransactionHash?: string;
+  cctpMessageHash?: string;
+  forwardingTransactionHash?: string;
   bridgeResult?: BridgeResult;
   burnObserved?: boolean;
+  permanentFailure?: boolean;
   localDemo?: boolean;
   settlementTxHash?: string;
+  refundTransactionHash?: string;
   quote?: Quote;
   signature?: `0x${string}`;
   authorization?: {
@@ -82,6 +101,27 @@ type StoredPayment = {
   updatedAt?: string;
 };
 type StoredAuthorization = NonNullable<StoredPayment["authorization"]>;
+type AttemptSnapshot = {
+  id: string;
+  status: string;
+  sourceChainId: number;
+  customerAddress: string;
+  refundAddress: string | null;
+  quoteExpiresAt: string | null;
+  registeredTransactionHash: string | null;
+  sourceTransactionHash: string | null;
+  messageHash: string | null;
+  forwardTxHash: string | null;
+  bridgeResult: BridgeResult | null;
+  bridgeRecoverable: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+  paymentIntent: {
+    status: string;
+    arcMintTransactionHash: string | null;
+    settlementTransactionHash: string | null;
+  };
+};
 
 function randomBytes32(): `0x${string}` {
   const value = crypto.getRandomValues(new Uint8Array(32));
@@ -127,6 +167,19 @@ const steps = [
   "Merchant paid",
 ];
 
+function transactionUrl(chainId: number, hash?: string | null) {
+  const explorer = chainsById.get(chainId)?.explorerUrl;
+  return explorer && hash ? `${explorer}/tx/${hash}` : null;
+}
+
+function formatTimestamp(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "long",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
 export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
   const { address, connector, isConnected } = useAccount();
   const chainId = useChainId();
@@ -139,6 +192,14 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [refundAddress, setRefundAddress] = useState("");
   const [recoverable, setRecoverable] = useState(false);
+  const [storedPayment, setStoredPayment] = useState<StoredPayment | null>(
+    null,
+  );
+  const [savedAttemptId, setSavedAttemptId] = useState("");
+  const [attemptSnapshot, setAttemptSnapshot] =
+    useState<AttemptSnapshot | null>(null);
+  const [recoveryError, setRecoveryError] = useState("");
+  const [notice, setNotice] = useState("");
   const [activeStep, setActiveStep] = useState(1);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -163,7 +224,10 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
               setActiveStep(value.step);
             if (value.quote) setQuote(value.quote);
             if (value.sourceChainId) setSourceChainId(value.sourceChainId);
+            if (value.refundAddress) setRefundAddress(value.refundAddress);
             setRecoverable(Boolean(value.bridgeResult && value.burnObserved));
+            setStoredPayment(value);
+            setSavedAttemptId(value.apiAttemptId ?? "");
           } catch {
             localStorage.removeItem(storageKey);
           }
@@ -177,6 +241,107 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         ),
       );
   }, [invoiceSlug, storageKey]);
+
+  useEffect(() => {
+    if (!savedAttemptId) return;
+    let cancelled = false;
+
+    async function refreshFromBackend() {
+      try {
+        const remote = await apiFetch<AttemptSnapshot>(
+          `/api/payment-attempts/${savedAttemptId}`,
+        );
+        if (cancelled) return;
+        const raw = localStorage.getItem(storageKey);
+        const current = raw
+          ? (JSON.parse(raw) as StoredPayment)
+          : ({ step: 1 } satisfies StoredPayment);
+        const step = Math.max(
+          current.step,
+          recoveryStep(remote.status, remote.paymentIntent.status),
+        );
+        const next: StoredPayment = {
+          ...current,
+          step,
+          attemptStatus: remote.status,
+          customerAddress: remote.customerAddress,
+          sourceChainId: remote.sourceChainId,
+          burnObserved: Boolean(
+            remote.sourceTransactionHash || current.burnObserved,
+          ),
+          permanentFailure: isPermanentAttemptFailure(
+            remote.status,
+            remote.bridgeRecoverable,
+          ),
+          updatedAt: new Date().toISOString(),
+          ...(remote.refundAddress
+            ? { refundAddress: remote.refundAddress }
+            : {}),
+          ...(remote.quoteExpiresAt
+            ? { quoteExpiresAt: remote.quoteExpiresAt }
+            : {}),
+          ...(remote.registeredTransactionHash
+            ? {
+                registeredTransactionHash: remote.registeredTransactionHash,
+              }
+            : {}),
+          ...(remote.sourceTransactionHash
+            ? { sourceTransactionHash: remote.sourceTransactionHash }
+            : {}),
+          ...(remote.messageHash
+            ? { cctpMessageHash: remote.messageHash }
+            : {}),
+          ...(remote.forwardTxHash
+            ? { forwardingTransactionHash: remote.forwardTxHash }
+            : {}),
+          ...(remote.bridgeResult ? { bridgeResult: remote.bridgeResult } : {}),
+          ...(remote.paymentIntent.settlementTransactionHash
+            ? {
+                settlementTxHash:
+                  remote.paymentIntent.settlementTransactionHash,
+              }
+            : {}),
+        };
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        setStoredPayment(next);
+        setAttemptSnapshot(remote);
+        setActiveStep(step);
+        setRecoverable(Boolean(remote.bridgeRecoverable && next.bridgeResult));
+        setRefundAddress(
+          (currentAddress) =>
+            currentAddress || remote.refundAddress || remote.customerAddress,
+        );
+        setInvoice((currentInvoice) =>
+          currentInvoice
+            ? {
+                ...currentInvoice,
+                status: remote.paymentIntent.status,
+                arcMintTransactionHash:
+                  remote.paymentIntent.arcMintTransactionHash,
+                settlementTransactionHash:
+                  remote.paymentIntent.settlementTransactionHash,
+              }
+            : currentInvoice,
+        );
+        setRecoveryError("");
+      } catch (caught) {
+        if (!cancelled)
+          setRecoveryError(
+            caught instanceof Error
+              ? caught.message
+              : "Saved payment could not be reconciled",
+          );
+      }
+    }
+
+    void refreshFromBackend();
+    const poll = window.setInterval(() => void refreshFromBackend(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+    };
+  }, [savedAttemptId, storageKey]);
+
   useEffect(() => {
     if (isConnected) {
       setActiveStep((step) => Math.max(step, 2));
@@ -189,12 +354,20 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
     setBusy(true);
     setError("");
     try {
-      setQuote(
-        await apiFetch<Quote>(`/api/payment-intents/${invoice.id}/quote`, {
+      const loadedQuote = await apiFetch<Quote>(
+        `/api/payment-intents/${invoice.id}/quote`,
+        {
           method: "POST",
           body: JSON.stringify({ sourceChainId }),
-        }),
+        },
       );
+      setQuote(loadedQuote);
+      savePayment({
+        invoiceId: invoice.id,
+        sourceChainId,
+        quote: loadedQuote,
+        quoteExpiresAt: loadedQuote.expiresAt,
+      });
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Circle quote failed",
@@ -227,6 +400,8 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
     };
     setActiveStep(step);
     localStorage.setItem(storageKey, JSON.stringify(next));
+    setStoredPayment(next);
+    setSavedAttemptId(next.apiAttemptId ?? "");
     return next;
   }
 
@@ -271,6 +446,10 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
             : "A source burn already exists. Reconciliation will continue without submitting another burn.",
         );
       }
+      if (payment.quote && Date.parse(payment.quote.expiresAt) <= Date.now())
+        throw new Error(
+          "The saved quote expired. Request a fresh quote before any source burn.",
+        );
 
       if (!payment.apiAttemptId) {
         if (Date.parse(quote.expiresAt) <= Date.now())
@@ -337,8 +516,13 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         });
         payment = savePayment({
           step: 2,
+          invoiceId: invoice.id,
           apiAttemptId: created.id,
           clientSecret: created.clientSecret,
+          attemptStatus: "QUOTED",
+          customerAddress: address,
+          refundAddress,
+          quoteExpiresAt: quote.expiresAt,
           sourceChainId,
           quote,
           signature,
@@ -399,7 +583,10 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
           ],
           chainId: arcTestnet.id,
         });
-        payment = savePayment({ registeredTransactionHash: registrationHash });
+        payment = savePayment({
+          attemptStatus: "REGISTERED",
+          registeredTransactionHash: registrationHash,
+        });
       }
       if (!arcPublicClient) throw new Error("Arc RPC client is unavailable");
       const registrationReceipt =
@@ -429,6 +616,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         if (!payload.values.txHash) return;
         payment = savePayment({
           step: 4,
+          attemptStatus: "BURN_SUBMITTED",
           burnObserved: true,
           sourceTransactionHash: payload.values.txHash,
         });
@@ -479,6 +667,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         const needsRecovery = result.state !== "success" && Boolean(burn);
         payment = savePayment({
           step: needsRecovery ? 4 : 5,
+          attemptStatus: needsRecovery ? "RECOVERABLE" : "BURN_SUBMITTED",
           burnObserved: true,
           sourceTransactionHash,
           bridgeResult: persistedResult,
@@ -555,6 +744,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
       const stillRecoverable = result.state !== "success";
       const updated = savePayment({
         step: stillRecoverable ? 5 : 6,
+        attemptStatus: stillRecoverable ? "RECOVERABLE" : "BURN_SUBMITTED",
         bridgeResult: persistedResult,
       });
       await updateAttempt(updated, {
@@ -598,6 +788,14 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
           }),
         },
       );
+      savePayment({
+        apiAttemptId: attempt.id,
+        attemptStatus: "QUOTED",
+        customerAddress: address,
+        refundAddress: address,
+        sourceChainId,
+        localDemo: true,
+      });
       const statusToStep: Record<string, number> = {
         QUOTED: 2,
         APPROVING: 3,
@@ -642,11 +840,70 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         chainId: arcTestnet.id,
       });
       saveStep(7, { settlementTxHash: hash });
+      setNotice(
+        "Settlement was submitted on Arc. Backend reconciliation will verify finality.",
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Settlement failed");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function requestRefund() {
+    if (!invoice?.vaultAddress || invoice.mode === "demo") return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      if (chainId !== arcTestnet.id)
+        await switchChainAsync({ chainId: arcTestnet.id });
+      const hash = await writeContractAsync({
+        address: invoice.vaultAddress as `0x${string}`,
+        abi: paymentVaultAbi,
+        functionName: "refund",
+        chainId: arcTestnet.id,
+      });
+      savePayment({ refundTransactionHash: hash });
+      setNotice(
+        "Refund was submitted to the customer-authorized Arc address. Backend reconciliation will verify it.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Refund failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resetExpiredPreBurnAttempt() {
+    const current = readPayment();
+    if (current.burnObserved || current.registeredTransactionHash) {
+      setError(
+        "This attempt is already registered or burned and cannot be replaced from the browser.",
+      );
+      return;
+    }
+    const savedCustomerAddress = current.customerAddress ?? address;
+    const savedRefundAddress = current.refundAddress ?? refundAddress;
+    const next: StoredPayment = {
+      step: Math.max(2, current.step),
+      ...(invoice?.id ? { invoiceId: invoice.id } : {}),
+      ...(savedCustomerAddress
+        ? { customerAddress: savedCustomerAddress }
+        : {}),
+      ...(savedRefundAddress ? { refundAddress: savedRefundAddress } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    setStoredPayment(next);
+    setSavedAttemptId("");
+    setAttemptSnapshot(null);
+    setQuote(null);
+    setRecoverable(false);
+    setRecoveryError("");
+    setNotice(
+      "The expired pre-burn attempt was cleared. Request a fresh quote.",
+    );
   }
 
   if (!invoice)
@@ -655,6 +912,32 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         <div className="card">{error || "Loading verified invoice…"}</div>
       </div>
     );
+  const sourceTransactionHash =
+    attemptSnapshot?.sourceTransactionHash ??
+    storedPayment?.sourceTransactionHash;
+  const sourceTransactionUrl = transactionUrl(
+    attemptSnapshot?.sourceChainId ??
+      storedPayment?.sourceChainId ??
+      sourceChainId,
+    sourceTransactionHash,
+  );
+  const arcTransactionHash =
+    invoice.settlementTransactionHash ??
+    storedPayment?.settlementTxHash ??
+    invoice.arcMintTransactionHash ??
+    attemptSnapshot?.forwardTxHash ??
+    storedPayment?.forwardingTransactionHash ??
+    storedPayment?.registeredTransactionHash;
+  const arcTransactionUrl = transactionUrl(arcTestnet.id, arcTransactionHash);
+  const refundAllowed = Boolean(
+    storedPayment?.apiAttemptId &&
+    refundIsPermitted(invoice.status, invoice.expiresAt),
+  );
+  const attemptStatus =
+    attemptSnapshot?.status ?? storedPayment?.attemptStatus ?? null;
+  const quoteExpired = Boolean(
+    quote && Date.parse(quote.expiresAt) <= Date.now(),
+  );
   return (
     <div className="page-shell">
       <div className="pay-layout">
@@ -700,7 +983,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
             </div>
             <div>
               <span>Expires</span>
-              <strong>{new Date(invoice.expiresAt).toLocaleString()}</strong>
+              <strong>{formatTimestamp(invoice.expiresAt)}</strong>
             </div>
             <div>
               <span>Refunds</span>
@@ -714,6 +997,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
               <input
                 id="refund-address"
                 value={refundAddress}
+                disabled={Boolean(savedAttemptId)}
                 onChange={(event) => setRefundAddress(event.target.value)}
                 placeholder="0x…"
                 autoComplete="off"
@@ -726,7 +1010,9 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
             </div>
             <div className="chain-choice">
               <button
+                type="button"
                 className={sourceChainId === baseSepolia.id ? "selected" : ""}
+                disabled={Boolean(savedAttemptId)}
                 onClick={() => {
                   setSourceChainId(baseSepolia.id);
                   setQuote(null);
@@ -735,7 +1021,9 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
                 Base Sepolia
               </button>
               <button
+                type="button"
                 className={sourceChainId === sepolia.id ? "selected" : ""}
+                disabled={Boolean(savedAttemptId)}
                 onClick={() => {
                   setSourceChainId(sepolia.id);
                   setQuote(null);
@@ -747,6 +1035,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
             {!quote ? (
               <button
                 className="button primary"
+                type="button"
                 disabled={!isConnected || busy}
                 onClick={() => {
                   void loadQuote();
@@ -788,6 +1077,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
                 {invoice.mode === "demo" ? (
                   <button
                     className="button primary"
+                    type="button"
                     disabled={busy}
                     onClick={() => {
                       void simulateDemo();
@@ -800,32 +1090,56 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
                 ) : (
                   <button
                     className="button primary"
-                    disabled={busy}
+                    type="button"
+                    disabled={
+                      busy ||
+                      quoteExpired ||
+                      Boolean(storedPayment?.permanentFailure)
+                    }
                     onClick={() => {
                       void pay();
                     }}
                   >
-                    {busy
-                      ? "Payment in progress…"
-                      : `Pay ${quote.totalSourceAmount} USDC`}
+                    {quoteExpired
+                      ? "Quote expired"
+                      : busy
+                        ? "Payment in progress…"
+                        : savedAttemptId && !storedPayment?.burnObserved
+                          ? "Resume payment"
+                          : `Pay ${quote.totalSourceAmount} USDC`}
                   </button>
                 )}
               </>
             )}
+            {quoteExpired &&
+              attemptStatus === "QUOTED" &&
+              !storedPayment?.registeredTransactionHash &&
+              !storedPayment?.burnObserved && (
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={resetExpiredPreBurnAttempt}
+                  type="button"
+                >
+                  Request a fresh quote
+                </button>
+              )}
             {recoverable && invoice.mode !== "demo" && (
               <button
                 className="button secondary"
+                type="button"
                 disabled={busy}
                 onClick={() => {
                   void resumeTransfer();
                 }}
               >
-                {busy ? "Resuming saved transfer…" : "Resume transfer"}
+                {busy ? "Retrying saved transfer…" : "Retry Circle bridge"}
               </button>
             )}
             {activeStep >= 6 && activeStep < 7 && invoice.mode !== "demo" && (
               <button
                 className="button secondary"
+                type="button"
                 disabled={busy}
                 onClick={() => {
                   void finalize();
@@ -834,7 +1148,70 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
                 Finalize on Arc
               </button>
             )}
-            {error && <div className="message error">{error}</div>}
+            {refundAllowed && invoice.mode !== "demo" && (
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => void requestRefund()}
+                type="button"
+              >
+                Request refund on Arc
+              </button>
+            )}
+            {(sourceTransactionUrl || arcTransactionUrl) && (
+              <div className="recovery-actions">
+                {sourceTransactionUrl && (
+                  <a
+                    className="button secondary"
+                    href={sourceTransactionUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    View source <ExternalLink size={13} />
+                  </a>
+                )}
+                {arcTransactionUrl && (
+                  <a
+                    className="button secondary"
+                    href={arcTransactionUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    View on ArcScan <ExternalLink size={13} />
+                  </a>
+                )}
+              </div>
+            )}
+            {["SETTLED", "REFUNDED"].includes(invoice.status) && (
+              <Link
+                className="button secondary"
+                href={`/receipts/${encodeURIComponent(invoice.slug)}`}
+              >
+                Open verified receipt
+              </Link>
+            )}
+            {storedPayment?.permanentFailure && (
+              <div className="message error" role="alert">
+                This attempt is permanently failed. No second burn will be
+                submitted. Use the recorded transactions or request a refund
+                when the vault permits it.
+              </div>
+            )}
+            {recoveryError && (
+              <div className="message error" role="alert">
+                Backend recovery: {recoveryError}
+              </div>
+            )}
+            {notice && (
+              <div className="message success" role="status">
+                {notice}
+              </div>
+            )}
+            {error && (
+              <div className="message error" role="alert">
+                {error}
+              </div>
+            )}
           </div>
         </section>
         <aside className="card">
@@ -851,6 +1228,54 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
             Attestation delays are recoverable. Progress is saved on this device
             without storing wallet credentials.
           </p>
+          {savedAttemptId && (
+            <div className="recovery-panel" aria-live="polite">
+              <div className="section-kicker">RECOVERED BACKEND STATE</div>
+              <div>
+                <span>Attempt</span>
+                <strong>{compactAddress(savedAttemptId)}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>{attemptStatus ?? "Syncing…"}</strong>
+              </div>
+              <div>
+                <span>Customer</span>
+                <strong>
+                  {compactAddress(
+                    attemptSnapshot?.customerAddress ??
+                      storedPayment?.customerAddress,
+                  )}
+                </strong>
+              </div>
+              <div>
+                <span>Refund</span>
+                <strong>
+                  {compactAddress(
+                    attemptSnapshot?.refundAddress ??
+                      storedPayment?.refundAddress,
+                  )}
+                </strong>
+              </div>
+              <div>
+                <span>Quote expiry</span>
+                <strong>
+                  {storedPayment?.quoteExpiresAt
+                    ? formatTimestamp(storedPayment.quoteExpiresAt)
+                    : "Pending"}
+                </strong>
+              </div>
+              <div>
+                <span>CCTP message</span>
+                <strong>
+                  {compactAddress(
+                    attemptSnapshot?.messageHash ??
+                      storedPayment?.cctpMessageHash,
+                  )}
+                </strong>
+              </div>
+            </div>
+          )}
         </aside>
       </div>
     </div>

@@ -886,7 +886,6 @@ export function createApp(): Application {
         },
         include: {
           merchant: true,
-          attempts: { orderBy: { createdAt: "desc" } },
           transactions: true,
         },
       });
