@@ -232,8 +232,12 @@ describe.skipIf(!databaseAvailable)("Arc indexer with PostgreSQL", () => {
     });
     await prisma.indexerCursor.deleteMany({ where: { chainId } });
     await prisma.chainTransaction.deleteMany({ where: { chainId } });
-    if (indexedMerchant)
+    if (indexedMerchant) {
+      await prisma.paymentIntent.deleteMany({
+        where: { merchantId: indexedMerchant.id },
+      });
       await prisma.merchant.delete({ where: { id: indexedMerchant.id } });
+    }
   });
 
   it("does not advance a failed page and recovers when merchant history appears", async () => {

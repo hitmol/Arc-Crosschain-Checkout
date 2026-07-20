@@ -1,6 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalPassThroughEnv": ["DATABASE_URL", "RUN_DATABASE_INTEGRATION_TESTS"],
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "RUN_DATABASE_INTEGRATION_TESTS",
+    "TEST_DATABASE_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

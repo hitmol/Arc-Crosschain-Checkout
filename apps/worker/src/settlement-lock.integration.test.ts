@@ -36,8 +36,10 @@ describe.skipIf(!databaseAvailable)(
     });
 
     afterAll(async () => {
-      if (merchantId)
+      if (merchantId) {
+        await prisma.paymentIntent.deleteMany({ where: { merchantId } });
         await prisma.merchant.delete({ where: { id: merchantId } });
+      }
     });
 
     it("atomically allows only one worker to claim settlement", async () => {

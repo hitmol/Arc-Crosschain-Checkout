@@ -4,8 +4,8 @@ export default defineConfig({
   test: {
     env: {
       DATABASE_URL:
-        process.env.DATABASE_URL ??
-        "postgresql://arc:arc@localhost:5432/arc_checkout_test?schema=public",
+        process.env.TEST_DATABASE_URL ??
+        "postgresql://arc:arc@localhost:5432/arc_checkout?schema=api_test",
       DEMO_MODE: "true",
     },
   },

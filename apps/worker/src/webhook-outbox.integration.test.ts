@@ -52,6 +52,9 @@ describeWithDatabase("transactional webhook outbox", () => {
   });
 
   afterAll(async () => {
+    await prisma.paymentIntent.deleteMany({
+      where: { merchant: { walletAddress: merchantAddress } },
+    });
     await prisma.merchant.deleteMany({
       where: { walletAddress: merchantAddress },
     });

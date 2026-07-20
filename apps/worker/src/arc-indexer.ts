@@ -93,10 +93,9 @@ function bigintArg(args: Record<string, unknown>, key: string): bigint {
 
 export function decodeOrderId(value: string): string {
   try {
-    const decoded = hexToString(value as `0x${string}`, { size: 32 }).replace(
-      /\0+$/g,
-      "",
-    );
+    const decoded = hexToString(value as `0x${string}`, {
+      size: 32,
+    }).replaceAll("\0", "");
     return decoded || value.toLowerCase();
   } catch {
     return value.toLowerCase();

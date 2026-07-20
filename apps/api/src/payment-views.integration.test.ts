@@ -23,6 +23,7 @@ describeWithDatabase("merchant dashboard and verified receipts", () => {
     await prisma.chainTransaction.deleteMany({
       where: { transactionHash: settlementHash },
     });
+    await prisma.paymentIntent.deleteMany({ where: { merchantId } });
     await prisma.merchant.deleteMany({
       where: { walletAddress: merchantAddress },
     });
