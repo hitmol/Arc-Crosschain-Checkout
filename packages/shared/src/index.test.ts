@@ -21,6 +21,7 @@ describe("USDC amount utilities", () => {
 
 describe("payment attempt authorization", () => {
   const attempt = {
+    quoteId: "11111111-1111-4111-8111-111111111111",
     attemptId: `0x${"11".repeat(32)}`,
     invoiceVault: "0x1111111111111111111111111111111111111111",
     orderId: `0x${"22".repeat(32)}`,

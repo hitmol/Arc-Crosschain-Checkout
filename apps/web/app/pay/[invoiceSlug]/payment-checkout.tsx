@@ -1,16 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AppKit } from "@circle-fin/app-kit";
+import { AppKit, type BridgeResult } from "@circle-fin/app-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
-import type { EIP1193Provider } from "viem";
+import {
+  bytesToHex,
+  hashTypedData,
+  isAddress,
+  type EIP1193Provider,
+} from "viem";
 import {
   useAccount,
   useChainId,
+  usePublicClient,
+  useSignTypedData,
   useSwitchChain,
   useWriteContract,
 } from "wagmi";
 import { arcTestnet, baseSepolia, sepolia } from "viem/chains";
+import { orderIdToBytes32, parseUsdc } from "@arc-checkout/shared";
 import { apiFetch, compactAddress } from "@/lib/api";
 import { paymentVaultAbi } from "@/lib/contracts";
 import { WalletButton } from "@/components/wallet-button";
@@ -29,7 +37,14 @@ type Invoice = {
   merchant: { displayName?: string; payoutAddress: string };
 };
 type Quote = {
+  quoteId: string;
+  requestedAmount: string;
   totalSourceAmount: string;
+  maxFee: string;
+  finalityThreshold: number;
+  transferSpeed: "FAST";
+  sourceChainId: number;
+  destinationChainId: 5_042_002;
   protocolFeeSubunits: string;
   forwardFeeSubunits: string;
   feeBufferSubunits: string;
@@ -37,6 +52,70 @@ type Quote = {
   vaultAddress: string;
   quoteSource: string;
 };
+type StoredPayment = {
+  step: number;
+  apiAttemptId?: string;
+  clientSecret?: string;
+  sourceChainId?: number;
+  registeredTransactionHash?: string;
+  sourceTransactionHash?: string;
+  bridgeResult?: BridgeResult;
+  burnObserved?: boolean;
+  localDemo?: boolean;
+  settlementTxHash?: string;
+  quote?: Quote;
+  signature?: `0x${string}`;
+  authorization?: {
+    attemptId: `0x${string}`;
+    sourceChainId: string;
+    destinationChainId: string;
+    invoiceVault: `0x${string}`;
+    orderId: `0x${string}`;
+    payer: `0x${string}`;
+    refundAddress: `0x${string}`;
+    destinationAmount: string;
+    maximumSourceAmount: string;
+    quoteExpiresAt: string;
+    nonce: string;
+    attemptExpiresAt: string;
+  };
+  updatedAt?: string;
+};
+type StoredAuthorization = NonNullable<StoredPayment["authorization"]>;
+
+function randomBytes32(): `0x${string}` {
+  const value = crypto.getRandomValues(new Uint8Array(32));
+  if (value.every((byte) => byte === 0)) value[31] = 1;
+  return bytesToHex(value);
+}
+
+function serializableBridgeResult(result: BridgeResult): BridgeResult {
+  return JSON.parse(
+    JSON.stringify(result, (_key, value: unknown) => {
+      if (typeof value === "bigint") return value.toString();
+      if (value instanceof Error)
+        return { name: value.name, message: value.message };
+      return value;
+    }),
+  ) as BridgeResult;
+}
+
+const paymentAuthorizationTypes = {
+  PaymentAuthorization: [
+    { name: "attemptId", type: "bytes32" },
+    { name: "sourceChainId", type: "uint256" },
+    { name: "destinationChainId", type: "uint256" },
+    { name: "invoiceVault", type: "address" },
+    { name: "orderId", type: "bytes32" },
+    { name: "payer", type: "address" },
+    { name: "refundAddress", type: "address" },
+    { name: "destinationAmount", type: "uint256" },
+    { name: "maximumSourceAmount", type: "uint256" },
+    { name: "quoteExpiresAt", type: "uint64" },
+    { name: "nonce", type: "uint256" },
+    { name: "attemptExpiresAt", type: "uint64" },
+  ],
+} as const;
 const steps = [
   "Invoice loaded",
   "Wallet connected",
@@ -53,9 +132,13 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const { signTypedDataAsync } = useSignTypedData();
+  const arcPublicClient = usePublicClient({ chainId: arcTestnet.id });
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [sourceChainId, setSourceChainId] = useState<number>(baseSepolia.id);
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [refundAddress, setRefundAddress] = useState("");
+  const [recoverable, setRecoverable] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,13 +154,16 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
           try {
-            const value = JSON.parse(saved) as { step?: number };
+            const value = JSON.parse(saved) as StoredPayment;
             if (
               Number.isInteger(value.step) &&
               (value.step ?? 0) >= 1 &&
               (value.step ?? 0) <= steps.length
             )
-              setActiveStep(value.step!);
+              setActiveStep(value.step);
+            if (value.quote) setQuote(value.quote);
+            if (value.sourceChainId) setSourceChainId(value.sourceChainId);
+            setRecoverable(Boolean(value.bridgeResult && value.burnObserved));
           } catch {
             localStorage.removeItem(storageKey);
           }
@@ -92,8 +178,11 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
       );
   }, [invoiceSlug, storageKey]);
   useEffect(() => {
-    if (isConnected) setActiveStep((step) => Math.max(step, 2));
-  }, [isConnected]);
+    if (isConnected) {
+      setActiveStep((step) => Math.max(step, 2));
+      setRefundAddress((current) => current || address || "");
+    }
+  }, [address, isConnected]);
 
   async function loadQuote() {
     if (!invoice) return;
@@ -115,12 +204,47 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
     }
   }
 
-  function saveStep(step: number, extra: object = {}) {
+  function readPayment(): StoredPayment {
+    const saved = localStorage.getItem(storageKey);
+    if (!saved) return { step: activeStep };
+    try {
+      return JSON.parse(saved) as StoredPayment;
+    } catch {
+      return { step: activeStep };
+    }
+  }
+
+  function savePayment(
+    patch: Partial<StoredPayment> & { step?: number },
+  ): StoredPayment {
+    const current = readPayment();
+    const step = Math.max(current.step ?? 1, patch.step ?? current.step ?? 1);
+    const next = {
+      ...current,
+      ...patch,
+      step,
+      updatedAt: new Date().toISOString(),
+    };
     setActiveStep(step);
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({ step, ...extra, updatedAt: new Date().toISOString() }),
-    );
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    return next;
+  }
+
+  function saveStep(step: number, extra: Partial<StoredPayment> = {}) {
+    savePayment({ ...extra, step });
+  }
+
+  async function updateAttempt(
+    payment: StoredPayment,
+    body: Record<string, unknown>,
+  ) {
+    if (!payment.apiAttemptId || !payment.clientSecret)
+      throw new Error("Saved payment attempt credentials are missing");
+    return apiFetch(`/api/payment-attempts/${payment.apiAttemptId}/progress`, {
+      method: "PATCH",
+      headers: { "x-payment-attempt-secret": payment.clientSecret },
+      body: JSON.stringify(body),
+    });
   }
 
   async function pay() {
@@ -131,36 +255,202 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
       );
       return;
     }
-    const customerAttemptFlowReady: boolean = false;
-    if (!customerAttemptFlowReady) {
-      setError(
-        "Real bridging is temporarily disabled until the customer EIP-712 attempt is persisted and registered on Arc before any USDC burn.",
-      );
+    if (!isAddress(refundAddress)) {
+      setError("Enter a valid EVM refund address before paying.");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      if (chainId !== sourceChainId)
-        await switchChainAsync({
-          chainId: sourceChainId,
+      let payment = readPayment();
+      if (payment.burnObserved) {
+        setRecoverable(Boolean(payment.bridgeResult));
+        throw new Error(
+          payment.bridgeResult
+            ? "A source burn already exists. Use Resume transfer; a second burn is blocked."
+            : "A source burn already exists. Reconciliation will continue without submitting another burn.",
+        );
+      }
+
+      if (!payment.apiAttemptId) {
+        if (Date.parse(quote.expiresAt) <= Date.now())
+          throw new Error(
+            "The quote expired. Request a new quote before signing.",
+          );
+        await switchChainAsync({ chainId: arcTestnet.id });
+        const attemptId = randomBytes32();
+        const nonce = BigInt(randomBytes32());
+        const authorization = {
+          attemptId,
+          sourceChainId: BigInt(sourceChainId),
+          destinationChainId: BigInt(arcTestnet.id),
+          invoiceVault: invoice.vaultAddress as `0x${string}`,
+          orderId: orderIdToBytes32(invoice.orderId),
+          payer: address,
+          refundAddress,
+          destinationAmount: parseUsdc(quote.requestedAmount),
+          maximumSourceAmount: parseUsdc(quote.totalSourceAmount),
+          quoteExpiresAt: BigInt(
+            Math.floor(new Date(quote.expiresAt).getTime() / 1000),
+          ),
+          nonce,
+          attemptExpiresAt: BigInt(
+            Math.floor(new Date(invoice.expiresAt).getTime() / 1000),
+          ),
+        } as const;
+        const typedData = {
+          domain: {
+            name: "Arc Crosschain Checkout",
+            version: "1",
+            chainId: arcTestnet.id,
+            verifyingContract: authorization.invoiceVault,
+          },
+          types: paymentAuthorizationTypes,
+          primaryType: "PaymentAuthorization" as const,
+          message: authorization,
+        };
+        const signature = await signTypedDataAsync(typedData);
+        const authorizationDigest = hashTypedData(typedData);
+        const created = await apiFetch<{
+          id: string;
+          clientSecret: string;
+        }>(`/api/payment-intents/${invoice.id}/attempts`, {
+          method: "POST",
+          body: JSON.stringify({
+            quoteId: quote.quoteId,
+            attemptId,
+            invoiceVault: authorization.invoiceVault,
+            orderId: invoice.orderId,
+            sourceChainId,
+            destinationChainId: arcTestnet.id,
+            customerAddress: address,
+            refundAddress,
+            destinationAmount: quote.requestedAmount,
+            quotedSourceAmount: quote.totalSourceAmount,
+            maximumSourceAmount: quote.totalSourceAmount,
+            quoteExpiresAt: quote.expiresAt,
+            nonce: nonce.toString(),
+            attemptExpiresAt: invoice.expiresAt,
+            authorizationDigest,
+            signature,
+          }),
         });
+        payment = savePayment({
+          step: 2,
+          apiAttemptId: created.id,
+          clientSecret: created.clientSecret,
+          sourceChainId,
+          quote,
+          signature,
+          authorization: Object.fromEntries(
+            Object.entries(authorization).map(([key, value]) => [
+              key,
+              typeof value === "bigint" ? value.toString() : value,
+            ]),
+          ) as StoredAuthorization,
+        });
+      }
+
+      if (!payment.authorization || !payment.signature)
+        throw new Error("Saved payment authorization is incomplete");
+      if (!payment.quote || !payment.sourceChainId)
+        throw new Error("Saved server quote is incomplete");
+      if (payment.authorization.payer.toLowerCase() !== address.toLowerCase())
+        throw new Error(
+          "Reconnect the wallet that signed this payment attempt",
+        );
+      if (
+        BigInt(payment.authorization.sourceChainId) !==
+          BigInt(payment.sourceChainId) ||
+        BigInt(payment.authorization.destinationAmount) !==
+          parseUsdc(payment.quote.requestedAmount) ||
+        BigInt(payment.authorization.maximumSourceAmount) !==
+          parseUsdc(payment.quote.totalSourceAmount) ||
+        payment.authorization.invoiceVault.toLowerCase() !==
+          invoice.vaultAddress.toLowerCase()
+      )
+        throw new Error("Saved payment route does not match its authorization");
+      const bridgeQuote = payment.quote;
+      const bridgeSourceChainId = payment.sourceChainId;
+
+      if (!payment.registeredTransactionHash) {
+        await switchChainAsync({ chainId: arcTestnet.id });
+        const stored = payment.authorization;
+        const registrationHash = await writeContractAsync({
+          address: stored.invoiceVault,
+          abi: paymentVaultAbi,
+          functionName: "registerPaymentAttempt",
+          args: [
+            {
+              attemptId: stored.attemptId,
+              sourceChainId: BigInt(stored.sourceChainId),
+              destinationChainId: BigInt(stored.destinationChainId),
+              invoiceVault: stored.invoiceVault,
+              orderId: stored.orderId,
+              payer: stored.payer,
+              refundAddress: stored.refundAddress,
+              destinationAmount: BigInt(stored.destinationAmount),
+              maximumSourceAmount: BigInt(stored.maximumSourceAmount),
+              quoteExpiresAt: BigInt(stored.quoteExpiresAt),
+              nonce: BigInt(stored.nonce),
+              attemptExpiresAt: BigInt(stored.attemptExpiresAt),
+            },
+            payment.signature,
+          ],
+          chainId: arcTestnet.id,
+        });
+        payment = savePayment({ registeredTransactionHash: registrationHash });
+      }
+      if (!arcPublicClient) throw new Error("Arc RPC client is unavailable");
+      const registrationReceipt =
+        await arcPublicClient.waitForTransactionReceipt({
+          hash: payment.registeredTransactionHash as `0x${string}`,
+          confirmations: 1,
+        });
+      if (registrationReceipt.status !== "success")
+        throw new Error("Payment attempt registration reverted on Arc");
+      await updateAttempt(payment, {
+        status: "REGISTERED",
+        registeredTransactionHash: payment.registeredTransactionHash,
+      });
+
+      await switchChainAsync({ chainId: bridgeSourceChainId });
       const provider = (await connector.getProvider()) as EIP1193Provider;
       const adapter = await createViemAdapterFromProvider({ provider });
       const kit = new AppKit();
-      kit.on("bridge.approve", () => saveStep(3));
-      kit.on("bridge.burn", (payload) =>
-        saveStep(4, { burnTxHash: payload.values.txHash }),
-      );
-      kit.on("bridge.fetchAttestation", () => saveStep(5));
-      kit.on("bridge.mint", (payload) =>
-        saveStep(6, { mintTxHash: payload.values.txHash }),
-      );
+      kit.on("bridge.approve", () => {
+        saveStep(3);
+        void updateAttempt(payment, {
+          status: "APPROVING",
+          registeredTransactionHash: payment.registeredTransactionHash,
+        }).catch(() => undefined);
+      });
+      kit.on("bridge.burn", (payload) => {
+        if (!payload.values.txHash) return;
+        payment = savePayment({
+          step: 4,
+          burnObserved: true,
+          sourceTransactionHash: payload.values.txHash,
+        });
+        void updateAttempt(payment, {
+          status: "BURN_SUBMITTED",
+          registeredTransactionHash: payment.registeredTransactionHash,
+          sourceTransactionHash: payload.values.txHash,
+        }).catch(() => undefined);
+      });
+      kit.on("*", (payload) => {
+        if (
+          "method" in payload &&
+          ["attestation", "fetchAttestation"].includes(String(payload.method))
+        )
+          saveStep(5);
+      });
+      kit.on("bridge.mint", () => saveStep(6));
       const result = await kit.bridge({
         from: {
           adapter,
           chain:
-            sourceChainId === baseSepolia.id
+            bridgeSourceChainId === baseSepolia.id
               ? "Base_Sepolia"
               : "Ethereum_Sepolia",
         },
@@ -169,21 +459,47 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
           chain: "Arc_Testnet",
           useForwarder: true,
         },
-        amount: quote.totalSourceAmount,
+        amount: bridgeQuote.totalSourceAmount,
+        config: {
+          transferSpeed: bridgeQuote.transferSpeed,
+          maxFee: bridgeQuote.maxFee,
+          batchTransactions: false,
+        },
       });
-      const burn = result.steps.find((step) => step.name === "burn");
-      await apiFetch(`/api/payment-intents/${invoice.id}/attempts`, {
-        method: "POST",
-        body: JSON.stringify({
-          sourceChainId,
-          customerAddress: address,
-          quotedSourceAmount: quote.totalSourceAmount,
-          sourceTransactionHash: burn?.txHash,
-        }),
-      });
+      const persistedResult = serializableBridgeResult(result);
+      const burn = result.steps.find(
+        (step) =>
+          step.name.toLowerCase() === "burn" &&
+          step.state === "success" &&
+          step.txHash,
+      );
+      const sourceTransactionHash =
+        burn?.txHash ?? payment.sourceTransactionHash;
+      if (sourceTransactionHash) {
+        const needsRecovery = result.state !== "success" && Boolean(burn);
+        payment = savePayment({
+          step: needsRecovery ? 4 : 5,
+          burnObserved: true,
+          sourceTransactionHash,
+          bridgeResult: persistedResult,
+        });
+        await updateAttempt(payment, {
+          status: needsRecovery ? "RECOVERABLE" : "BURN_SUBMITTED",
+          registeredTransactionHash: payment.registeredTransactionHash,
+          sourceTransactionHash,
+          bridgeResult: persistedResult,
+          ...(needsRecovery
+            ? {
+                errorCode: "APP_KIT_RECOVERY_REQUIRED",
+                errorMessage: "Resume the persisted bridge result",
+              }
+            : {}),
+        });
+        setRecoverable(needsRecovery);
+      }
       if (result.state !== "success")
         throw new Error(
-          "The transfer is pending or needs recovery. Your completed steps were saved.",
+          "The source burn is saved. Resume this exact transfer; no second burn will be submitted.",
         );
     } catch (caught) {
       setError(
@@ -196,19 +512,89 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
     }
   }
 
+  async function resumeTransfer() {
+    if (!connector || !address) return;
+    const payment = readPayment();
+    const successfulBurn = payment.bridgeResult?.steps.find(
+      (step) =>
+        step.name.toLowerCase() === "burn" &&
+        step.state === "success" &&
+        step.txHash?.toLowerCase() ===
+          payment.sourceTransactionHash?.toLowerCase(),
+    );
+    if (
+      !payment.bridgeResult ||
+      !payment.sourceChainId ||
+      !payment.sourceTransactionHash ||
+      !successfulBurn
+    ) {
+      setError(
+        "Safe retry is unavailable because no persisted successful burn result was found. Reconciliation will keep monitoring the recorded transaction.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await switchChainAsync({ chainId: payment.sourceChainId });
+      const provider = (await connector.getProvider()) as EIP1193Provider;
+      const adapter = await createViemAdapterFromProvider({ provider });
+      const kit = new AppKit();
+      kit.on("*", (payload) => {
+        if (
+          "method" in payload &&
+          ["attestation", "fetchAttestation"].includes(String(payload.method))
+        )
+          saveStep(5);
+      });
+      kit.on("bridge.mint", () => saveStep(6));
+      const result = await kit.retryBridge(payment.bridgeResult, {
+        from: adapter,
+      });
+      const persistedResult = serializableBridgeResult(result);
+      const stillRecoverable = result.state !== "success";
+      const updated = savePayment({
+        step: stillRecoverable ? 5 : 6,
+        bridgeResult: persistedResult,
+      });
+      await updateAttempt(updated, {
+        status: stillRecoverable ? "RECOVERABLE" : "BURN_SUBMITTED",
+        registeredTransactionHash: updated.registeredTransactionHash,
+        sourceTransactionHash: updated.sourceTransactionHash,
+        bridgeResult: persistedResult,
+        ...(stillRecoverable
+          ? {
+              errorCode: "APP_KIT_RECOVERY_REQUIRED",
+              errorMessage: "Persisted bridge retry is still pending",
+            }
+          : {}),
+      });
+      setRecoverable(stillRecoverable);
+      if (stillRecoverable)
+        throw new Error(
+          "The same transfer is still pending. Its recovery state was saved again.",
+        );
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Bridge recovery failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function simulateDemo() {
     if (!invoice || !address) return;
     setBusy(true);
     setError("");
     try {
       const attempt = await apiFetch<{ id: string }>(
-        `/api/payment-intents/${invoice.id}/attempts`,
+        `/api/payment-intents/${invoice.id}/demo-attempts`,
         {
           method: "POST",
           body: JSON.stringify({
             sourceChainId,
             customerAddress: address,
-            quotedSourceAmount: quote?.totalSourceAmount ?? invoice.amount,
           }),
         },
       );
@@ -323,6 +709,21 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
           </div>
           <div className="payment-actions">
             <WalletButton />
+            <div className="field full">
+              <label htmlFor="refund-address">Refund address on Arc</label>
+              <input
+                id="refund-address"
+                value={refundAddress}
+                onChange={(event) => setRefundAddress(event.target.value)}
+                placeholder="0x…"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className="field-hint">
+                Confirm this carefully. Any excess or refund is sent here on
+                Arc.
+              </p>
+            </div>
             <div className="chain-choice">
               <button
                 className={sourceChainId === baseSepolia.id ? "selected" : ""}
@@ -410,6 +811,17 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
                   </button>
                 )}
               </>
+            )}
+            {recoverable && invoice.mode !== "demo" && (
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => {
+                  void resumeTransfer();
+                }}
+              >
+                {busy ? "Resuming saved transfer…" : "Resume transfer"}
+              </button>
             )}
             {activeStep >= 6 && activeStep < 7 && invoice.mode !== "demo" && (
               <button

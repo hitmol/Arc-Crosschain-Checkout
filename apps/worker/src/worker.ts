@@ -4,8 +4,12 @@ import {
   type PaymentIntent,
   type WebhookEndpoint,
 } from "@arc-checkout/database";
-import { fetchCctpMessage } from "@arc-checkout/cctp";
-import { chainsByKey } from "@arc-checkout/chain-config";
+import { fetchCctpMessages, selectCctpMessage } from "@arc-checkout/cctp";
+import {
+  chainsById,
+  chainsByKey,
+  viemChains,
+} from "@arc-checkout/chain-config";
 import { formatUsdc } from "@arc-checkout/shared";
 import pino from "pino";
 import {
@@ -20,6 +24,11 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 import { z } from "zod";
 import { indexArcEvents } from "./arc-indexer.js";
+import {
+  CctpReconciliationError,
+  validateSourceTransaction,
+  validatedArcMintAmount,
+} from "./cctp-reconciliation.js";
 
 const env = z
   .object({
@@ -27,6 +36,14 @@ const env = z
       .enum(["development", "test", "production"])
       .default("development"),
     ARC_RPC_URL: z.string().url().default(chainsByKey.arcTestnet.defaultRpcUrl),
+    BASE_SEPOLIA_RPC_URL: z
+      .string()
+      .url()
+      .default(chainsByKey.baseSepolia.defaultRpcUrl),
+    ETHEREUM_SEPOLIA_RPC_URL: z
+      .string()
+      .url()
+      .default(chainsByKey.ethereumSepolia.defaultRpcUrl),
     CIRCLE_API_BASE_URL: z
       .string()
       .url()
@@ -69,6 +86,14 @@ const logger = pino({
 const publicClient = createPublicClient({
   chain: arcTestnet,
   transport: http(env.ARC_RPC_URL),
+});
+const baseSepoliaClient = createPublicClient({
+  chain: viemChains.baseSepolia,
+  transport: http(env.BASE_SEPOLIA_RPC_URL),
+});
+const ethereumSepoliaClient = createPublicClient({
+  chain: viemChains.ethereumSepolia,
+  transport: http(env.ETHEREUM_SEPOLIA_RPC_URL),
 });
 const vaultAbi = parseAbi([
   "function currentBalance() view returns (uint256)",
@@ -142,27 +167,122 @@ async function reconcileCctpAttempts() {
   const attempts = await prisma.paymentAttempt.findMany({
     where: {
       sourceTransactionHash: { not: null },
-      status: { in: ["BURN_SUBMITTED", "SOURCE_CONFIRMED", "ATTESTING"] },
+      status: {
+        in: ["BURN_SUBMITTED", "SOURCE_CONFIRMED", "ATTESTING", "RECOVERABLE"],
+      },
     },
     include: { paymentIntent: true },
     take: 50,
   });
   for (const attempt of attempts) {
     try {
-      const message = await fetchCctpMessage(
+      const source = chainsById.get(attempt.sourceChainId);
+      if (
+        !source ||
+        !attempt.sourceTransactionHash ||
+        !attempt.vaultAddress ||
+        !attempt.maximumSourceAmount ||
+        !attempt.destinationAmount ||
+        attempt.maxFee === null ||
+        attempt.finalityThreshold === null
+      ) {
+        throw new CctpReconciliationError(
+          "Payment attempt is missing immutable CCTP expectations",
+        );
+      }
+      const sourceClient =
+        attempt.sourceChainId === viemChains.baseSepolia.id
+          ? baseSepoliaClient
+          : attempt.sourceChainId === viemChains.ethereumSepolia.id
+            ? ethereumSepoliaClient
+            : null;
+      if (!sourceClient)
+        throw new CctpReconciliationError("Unsupported source chain");
+      const sourceHash = attempt.sourceTransactionHash as Hex;
+      const [sourceReceipt, sourceTransaction, sourceHead] = await Promise.all([
+        sourceClient.getTransactionReceipt({ hash: sourceHash }),
+        sourceClient.getTransaction({ hash: sourceHash }),
+        sourceClient.getBlockNumber(),
+      ]);
+      const sourceConfirmed = validateSourceTransaction({
+        receipt: sourceReceipt,
+        transaction: sourceTransaction,
+        expectedHash: sourceHash,
+        expectedPayer: attempt.customerAddress as Address,
+        headBlock: sourceHead,
+        requiredConfirmations: source.confirmations,
+      });
+      if (!sourceConfirmed) continue;
+      if (
+        attempt.status === "BURN_SUBMITTED" ||
+        attempt.status === "RECOVERABLE"
+      ) {
+        await prisma.paymentAttempt.update({
+          where: { id: attempt.id },
+          data: { status: "SOURCE_CONFIRMED" },
+        });
+        await queueWebhook(attempt.paymentIntent, "payment.source_confirmed");
+      }
+
+      const response = await fetchCctpMessages(
         attempt.sourceChainId,
-        attempt.sourceTransactionHash!,
+        sourceHash,
         env.CIRCLE_API_BASE_URL,
         AbortSignal.timeout(8000),
       );
-      if (!message) continue;
-      if (message.forwardTxHash) {
+      if (!response || response.messages.length === 0) continue;
+      const message = selectCctpMessage(response.messages, {
+        sourceChainId: attempt.sourceChainId,
+        sourceTransactionHash: sourceHash,
+        destinationChainId: 5_042_002,
+        mintRecipient: attempt.vaultAddress as Address,
+        sourceSender: attempt.customerAddress as Address,
+        burnAmount: attempt.maximumSourceAmount,
+        minimumDestinationAmount: attempt.destinationAmount,
+        maxFee: attempt.maxFee,
+        finalityThreshold: attempt.finalityThreshold,
+      });
+      const messageData = {
+        cctpMessageId: message.messageHash,
+        sourceDomain: message.sourceDomain,
+        destinationDomain: message.destinationDomain,
+        messageHash: message.messageHash,
+        eventNonce: message.eventNonce ?? message.nonce,
+        burnToken: message.burnToken.toLowerCase(),
+        mintRecipient: message.mintRecipient.toLowerCase(),
+        burnAmount: message.burnAmount,
+        finalityThreshold: message.minFinalityThreshold,
+        sourceSender: message.sourceSender.toLowerCase(),
+        forwardState: message.forwardState,
+        forwardTxHash: message.forwardTxHash,
+        cctpMessage: message.rawMessage,
+        cctpAttestation: message.attestation,
+      };
+      if (
+        ["confirmed", "complete"].includes(
+          message.forwardState?.toLowerCase() ?? "",
+        ) &&
+        message.forwardTxHash
+      ) {
+        const arcReceipt = await publicClient.getTransactionReceipt({
+          hash: message.forwardTxHash,
+        });
+        const mintedAmount = validatedArcMintAmount({
+          receipt: arcReceipt,
+          usdc: chainsByKey.arcTestnet.usdc as Address,
+          vault: attempt.vaultAddress as Address,
+          expectedAmount: message.destinationAmount,
+        });
         await prisma.$transaction([
           prisma.paymentAttempt.update({
             where: { id: attempt.id },
             data: {
+              ...messageData,
               status: "ARC_MINTED",
-              cctpMessageId: message.messageHash ?? message.eventNonce ?? null,
+              mintedAmount,
+              bridgeRecoverable: false,
+              errorCode: null,
+              errorMessage: null,
             },
           }),
           prisma.paymentIntent.update({
@@ -171,16 +291,27 @@ async function reconcileCctpAttempts() {
           }),
         ]);
         await queueWebhook(attempt.paymentIntent, "payment.arc_minted");
-      } else if (message.status === "complete") {
+      } else {
         await prisma.paymentAttempt.update({
           where: { id: attempt.id },
           data: {
+            ...messageData,
             status: "ATTESTING",
-            cctpMessageId: message.messageHash ?? message.eventNonce ?? null,
           },
         });
       }
     } catch (error) {
+      if (error instanceof CctpReconciliationError) {
+        await prisma.paymentAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            active: false,
+            status: "FAILED",
+            errorCode: "CCTP_RECONCILIATION_FAILED",
+            errorMessage: error.message.slice(0, 500),
+          },
+        });
+      }
       logger.warn(
         {
           attemptId: attempt.id,

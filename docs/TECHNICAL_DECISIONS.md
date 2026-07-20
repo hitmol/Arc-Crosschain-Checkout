@@ -4,11 +4,13 @@ Verified 2026-07-20 using official Arc and Circle primary documentation.
 
 ## App Kit and direct primitives
 
-Circle App Kit with the Viem browser-wallet adapter is selected for customer bridging because the product may later add send/swap capabilities. The API and worker use Circle Iris endpoints directly for fee quotes and resumable status indexing. App Kit abstracts approve, burn, attestation, and mint while the application retains invoice-specific state.
+Circle App Kit with the Viem browser-wallet adapter is selected for customer bridging because the product may later add send/swap capabilities. The API and worker use Circle Iris endpoints directly for fee quotes and resumable status indexing. App Kit abstracts approve, burn, attestation, and mint while the application persists the complete `BridgeResult`. The UI listens through the SDK wildcard payload and recognizes both the documented `attestation` method name and the installed SDK's `fetchAttestation` name during the upstream naming transition.
+
+Fast transfer uses the server-issued `maxFee`, finality threshold 1000, forwarding, and sequential transactions (`batchTransactions: false`). A successful burn is never replaced by a new bridge call; recovery resumes the persisted result.
 
 ## Forwarding Service
 
-Arc, Base, and Ethereum support CCTP V2 and Arc supports Forwarding as a destination. The vault is the EVM `mintRecipient`; `destinationCaller` remains unrestricted. This avoids a destination relayer wallet for minting and does not violate the documented wrapper limitation.
+Arc, Base, and Ethereum support CCTP V2 and Arc supports Forwarding as a destination. The vault is the EVM `mintRecipient`; `destinationCaller` is the zero address and therefore unrestricted. This avoids a destination relayer wallet for minting and does not violate the documented wrapper limitation.
 
 ## Per-invoice vaults
 

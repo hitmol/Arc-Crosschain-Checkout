@@ -18,6 +18,7 @@ import {
   orderIdToBytes32,
   parseUsdc,
   paymentAttemptInputSchema,
+  paymentAttemptProgressSchema,
   paymentIntentInputSchema,
   webhookInputSchema,
 } from "@arc-checkout/shared";
@@ -48,6 +49,10 @@ import {
 import { jsonSafe } from "./serialize.js";
 import { verifyPaymentAuthorization } from "./payment-authorization.js";
 import {
+  assertClientStatusTransition,
+  verifyAttemptSecret,
+} from "./payment-attempt-access.js";
+import {
   assertSafeWebhookUrl,
   decryptSecret,
   encryptSecret,
@@ -60,6 +65,7 @@ const logger = pino({
   redact: [
     "req.headers.authorization",
     "req.headers.cookie",
+    "req.headers.x-payment-attempt-secret",
     "req.body.secret",
     "*.encryptedSecret",
   ],
@@ -169,8 +175,13 @@ export function createApp(): Application {
     cors({
       origin: config.NEXT_PUBLIC_APP_URL,
       credentials: true,
-      methods: ["GET", "POST", "DELETE"],
-      allowedHeaders: ["Content-Type", "Idempotency-Key", "Authorization"],
+      methods: ["GET", "POST", "PATCH", "DELETE"],
+      allowedHeaders: [
+        "Content-Type",
+        "Idempotency-Key",
+        "Authorization",
+        "X-Payment-Attempt-Secret",
+      ],
     }),
   );
   app.use(express.json({ limit: "64kb" }));
@@ -846,7 +857,7 @@ export function createApp(): Application {
         response.status(404).json({ error: "Payment intent not found" });
         return;
       }
-      if (intent.status !== "OPEN" && intent.status !== "PARTIALLY_FUNDED") {
+      if (intent.status !== "OPEN" || intent.fundedAmount !== 0n) {
         response.status(409).json({ error: "Invoice is not payable" });
         return;
       }
@@ -858,39 +869,115 @@ export function createApp(): Application {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8_000);
       try {
+        let quote;
+        let quoteSource: "circle-iris" | "local-mock" = "circle-iris";
         try {
-          const quote = await fetchCheckoutQuote(
+          quote = await fetchCheckoutQuote(
             sourceChainId,
             formatUsdc(remaining),
             config.CIRCLE_API_BASE_URL,
             controller.signal,
           );
-          response.json(
-            jsonSafe({
-              ...quote,
-              sourceChainId,
-              destinationChainId: 5_042_002,
-              vaultAddress: intent.vaultAddress,
-              quoteSource: "circle-iris",
-            }),
-          );
         } catch (error) {
           if (!config.DEMO_MODE) throw error;
           const { calculateQuote } = await import("@arc-checkout/cctp");
-          const quote = calculateQuote(formatUsdc(remaining), 0, 50_000n, 0);
-          response.json(
-            jsonSafe({
-              ...quote,
-              sourceChainId,
-              destinationChainId: 5_042_002,
-              vaultAddress: intent.vaultAddress,
-              quoteSource: "local-mock",
-            }),
-          );
+          quote = calculateQuote(formatUsdc(remaining), 0, 50_000n, 0);
+          quoteSource = "local-mock";
         }
+        const effectiveExpiry = new Date(
+          Math.min(
+            new Date(quote.expiresAt).getTime(),
+            intent.expiresAt.getTime() - 1_000,
+          ),
+        );
+        if (effectiveExpiry <= new Date()) {
+          response
+            .status(410)
+            .json({ error: "Invoice expires too soon to quote" });
+          return;
+        }
+        const persistedQuote = await prisma.paymentQuote.create({
+          data: {
+            sourceChainId,
+            destinationChainId: 5_042_002,
+            requestedDestinationAmount: quote.requestedAmountSubunits,
+            protocolFee: quote.protocolFeeSubunits,
+            forwardFee: quote.forwardFeeSubunits,
+            feeBuffer: quote.feeBufferSubunits,
+            maxFee: quote.maxFeeSubunits,
+            maximumSourceAmount: quote.totalSourceAmountSubunits,
+            finalityThreshold: quote.finalityThreshold,
+            transferSpeed: quote.transferSpeed,
+            expiresAt: effectiveExpiry,
+            paymentIntentId: intent.id,
+          },
+        });
+        response.json(
+          jsonSafe({
+            ...quote,
+            expiresAt: effectiveExpiry.toISOString(),
+            quoteId: persistedQuote.id,
+            sourceChainId,
+            destinationChainId: 5_042_002,
+            vaultAddress: intent.vaultAddress,
+            quoteSource,
+          }),
+        );
       } finally {
         clearTimeout(timeout);
       }
+    }),
+  );
+
+  app.post(
+    "/api/payment-intents/:id/demo-attempts",
+    asyncRoute(async (request, response) => {
+      if (!config.DEMO_MODE) {
+        response.status(404).json({ error: "Demo lifecycle is disabled" });
+        return;
+      }
+      const input = z
+        .object({
+          sourceChainId: z.union([z.literal(84532), z.literal(11155111)]),
+          customerAddress: addressSchema,
+        })
+        .parse(request.body);
+      const intent = await prisma.paymentIntent.findFirst({
+        where: {
+          OR: [
+            { id: String(request.params.id) },
+            { slug: String(request.params.id) },
+          ],
+        },
+      });
+      if (!intent) {
+        response.status(404).json({ error: "Payment intent not found" });
+        return;
+      }
+      const existing = await prisma.paymentAttempt.findFirst({
+        where: { paymentIntentId: intent.id, active: true },
+      });
+      if (existing) {
+        response.json(jsonSafe(existing));
+        return;
+      }
+      const attempt = await prisma.paymentAttempt.create({
+        data: {
+          active: true,
+          vaultAddress: intent.vaultAddress,
+          orderIdBytes32: intent.orderIdBytes32,
+          sourceChainId: input.sourceChainId,
+          destinationChainId: 5_042_002,
+          customerAddress: input.customerAddress.toLowerCase(),
+          refundAddress: input.customerAddress.toLowerCase(),
+          destinationAmount: intent.expectedAmount,
+          quotedSourceAmount: intent.expectedAmount,
+          maximumSourceAmount: intent.expectedAmount,
+          status: "QUOTED",
+          paymentIntentId: intent.id,
+        },
+      });
+      response.status(201).json(jsonSafe(attempt));
     }),
   );
 
@@ -910,8 +997,30 @@ export function createApp(): Application {
         response.status(404).json({ error: "Payment intent not found" });
         return;
       }
-      if (intent.status !== "OPEN" || intent.expiresAt <= new Date()) {
+      if (
+        intent.status !== "OPEN" ||
+        intent.fundedAmount !== 0n ||
+        intent.expiresAt <= new Date()
+      ) {
         response.status(409).json({ error: "Invoice is not payable" });
+        return;
+      }
+      if (input.registeredTransactionHash || input.sourceTransactionHash) {
+        response.status(400).json({
+          error: "Create the signed attempt before submitting any transaction",
+        });
+        return;
+      }
+      const quote = await prisma.paymentQuote.findUnique({
+        where: { id: input.quoteId },
+      });
+      if (
+        !quote ||
+        quote.paymentIntentId !== intent.id ||
+        quote.usedAt ||
+        quote.expiresAt <= new Date()
+      ) {
+        response.status(409).json({ error: "Quote is invalid or expired" });
         return;
       }
       if (
@@ -949,11 +1058,16 @@ export function createApp(): Application {
       const quotedSourceAmount = parseUsdc(input.quotedSourceAmount);
       const quoteExpiresAt = new Date(input.quoteExpiresAt);
       const attemptExpiresAt = new Date(input.attemptExpiresAt);
+      const remaining = intent.expectedAmount - intent.fundedAmount;
       if (
-        destinationAmount !== intent.expectedAmount ||
-        maximumSourceAmount !== quotedSourceAmount ||
+        input.sourceChainId !== quote.sourceChainId ||
+        input.destinationChainId !== quote.destinationChainId ||
+        destinationAmount !== quote.requestedDestinationAmount ||
+        destinationAmount !== remaining ||
+        maximumSourceAmount !== quote.maximumSourceAmount ||
+        quotedSourceAmount !== quote.maximumSourceAmount ||
         maximumSourceAmount < destinationAmount ||
-        quoteExpiresAt <= new Date() ||
+        quoteExpiresAt.getTime() !== quote.expiresAt.getTime() ||
         attemptExpiresAt <= quoteExpiresAt ||
         attemptExpiresAt > intent.expiresAt
       ) {
@@ -987,17 +1101,31 @@ export function createApp(): Application {
           .json({ error: "Invalid payment attempt authorization" });
         return;
       }
+      const clientSecret = createOpaqueToken(32);
       const attempt = await prisma.$transaction(async (transaction) => {
+        const claimedQuote = await transaction.paymentQuote.updateMany({
+          where: {
+            id: quote.id,
+            paymentIntentId: intent.id,
+            usedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          data: { usedAt: new Date() },
+        });
+        if (claimedQuote.count !== 1)
+          throw new AuthError("Quote was already used or expired", 409);
         const active = await transaction.paymentAttempt.findFirst({
           where: { paymentIntentId: intent.id, active: true },
         });
         if (active) {
-          if (
-            !active.attemptExpiresAt ||
-            active.attemptExpiresAt > new Date() ||
-            active.customerAddress !== input.customerAddress.toLowerCase() ||
-            active.refundAddress !== input.refundAddress.toLowerCase()
-          )
+          const now = new Date();
+          const replaceable =
+            (active.status === "QUOTED" &&
+              active.quoteExpiresAt !== null &&
+              active.quoteExpiresAt <= now) ||
+            (active.attemptExpiresAt !== null &&
+              active.attemptExpiresAt <= now);
+          if (!replaceable)
             throw new AuthError(
               "Invoice already has a conflicting active customer attempt",
               409,
@@ -1021,20 +1149,24 @@ export function createApp(): Application {
             destinationAmount,
             quotedSourceAmount,
             maximumSourceAmount,
+            maxFee: quote.maxFee,
+            finalityThreshold: quote.finalityThreshold,
             quoteExpiresAt,
             nonce: BigInt(input.nonce),
             attemptExpiresAt,
             authorizationDigest: digest.toLowerCase(),
             signature: input.signature.toLowerCase(),
-            registeredTransactionHash:
-              input.registeredTransactionHash?.toLowerCase() ?? null,
-            sourceTransactionHash:
-              input.sourceTransactionHash?.toLowerCase() ?? null,
-            status: input.registeredTransactionHash ? "REGISTERED" : "QUOTED",
+            clientSecretHash: hashOpaqueSecret(clientSecret),
+            quoteId: quote.id,
+            status: "QUOTED",
           },
         });
       });
-      response.status(201).json(jsonSafe(attempt));
+      const payload = jsonSafe(attempt);
+      delete payload.clientSecretHash;
+      delete payload.signature;
+      delete payload.authorizationDigest;
+      response.status(201).json({ ...payload, clientSecret });
     }),
   );
 
@@ -1050,7 +1182,148 @@ export function createApp(): Application {
         return;
       }
       response.setHeader("Cache-Control", "no-store");
-      response.json(jsonSafe(attempt));
+      const payload = jsonSafe(attempt);
+      delete payload.clientSecretHash;
+      delete payload.signature;
+      delete payload.authorizationDigest;
+      response.json(payload);
+    }),
+  );
+
+  app.patch(
+    "/api/payment-attempts/:id/progress",
+    asyncRoute(async (request, response) => {
+      const input = paymentAttemptProgressSchema.parse(request.body);
+      const attempt = await prisma.paymentAttempt.findUnique({
+        where: { id: String(request.params.id) },
+      });
+      if (!attempt) {
+        response.status(404).json({ error: "Payment attempt not found" });
+        return;
+      }
+      if (
+        !verifyAttemptSecret(
+          request.header("x-payment-attempt-secret"),
+          attempt.clientSecretHash,
+        )
+      ) {
+        response.status(401).json({ error: "Invalid payment attempt secret" });
+        return;
+      }
+      if (
+        [
+          "SOURCE_CONFIRMED",
+          "ATTESTING",
+          "ARC_MINTED",
+          "SETTLING",
+          "SETTLED",
+        ].includes(attempt.status)
+      ) {
+        const registrationConflicts =
+          input.registeredTransactionHash &&
+          attempt.registeredTransactionHash !==
+            input.registeredTransactionHash.toLowerCase();
+        const sourceConflicts =
+          input.sourceTransactionHash &&
+          attempt.sourceTransactionHash !==
+            input.sourceTransactionHash.toLowerCase();
+        if (registrationConflicts || sourceConflicts) {
+          response.status(409).json({
+            error: "Client transaction does not match reconciled attempt",
+          });
+          return;
+        }
+        const payload = jsonSafe(attempt);
+        delete payload.clientSecretHash;
+        delete payload.signature;
+        delete payload.authorizationDigest;
+        response.json(payload);
+        return;
+      }
+      try {
+        assertClientStatusTransition(attempt.status, input.status);
+      } catch (error) {
+        response.status(409).json({
+          error: error instanceof Error ? error.message : "Invalid transition",
+        });
+        return;
+      }
+      const registeredTransactionHash =
+        input.registeredTransactionHash?.toLowerCase() ??
+        attempt.registeredTransactionHash;
+      const sourceTransactionHash =
+        input.sourceTransactionHash?.toLowerCase() ??
+        attempt.sourceTransactionHash;
+      if (
+        attempt.registeredTransactionHash &&
+        input.registeredTransactionHash &&
+        attempt.registeredTransactionHash !==
+          input.registeredTransactionHash.toLowerCase()
+      ) {
+        response
+          .status(409)
+          .json({ error: "Registration transaction cannot change" });
+        return;
+      }
+      if (
+        attempt.sourceTransactionHash &&
+        input.sourceTransactionHash &&
+        attempt.sourceTransactionHash !==
+          input.sourceTransactionHash.toLowerCase()
+      ) {
+        response
+          .status(409)
+          .json({ error: "Source transaction cannot change" });
+        return;
+      }
+      if (!registeredTransactionHash) {
+        response
+          .status(400)
+          .json({ error: "Registration transaction is required" });
+        return;
+      }
+      if (
+        ["BURN_SUBMITTED", "RECOVERABLE"].includes(input.status) &&
+        !sourceTransactionHash
+      ) {
+        response
+          .status(400)
+          .json({ error: "Source burn transaction is required" });
+        return;
+      }
+      if (input.status === "RECOVERABLE" && !input.bridgeResult) {
+        response
+          .status(400)
+          .json({ error: "Recoverable BridgeResult is required" });
+        return;
+      }
+      const updated = await prisma.paymentAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: input.status,
+          registeredTransactionHash,
+          sourceTransactionHash,
+          ...(input.bridgeResult === undefined
+            ? {}
+            : {
+                bridgeResult: jsonSafe(input.bridgeResult),
+              }),
+          bridgeRecoverable: input.status === "RECOVERABLE",
+          errorCode:
+            input.status === "RECOVERABLE"
+              ? (input.errorCode ?? attempt.errorCode)
+              : null,
+          errorMessage:
+            input.status === "RECOVERABLE"
+              ? (input.errorMessage ?? attempt.errorMessage)
+              : null,
+        },
+      });
+      const payload = jsonSafe(updated);
+      delete payload.clientSecretHash;
+      delete payload.signature;
+      delete payload.authorizationDigest;
+      response.json(payload);
     }),
   );
 

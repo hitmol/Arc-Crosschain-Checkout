@@ -56,9 +56,11 @@ sequenceDiagram
   C->>V: registerPaymentAttempt(authorization, signature)
   V-->>A: PaymentAttemptRegistered (indexed)
   C->>P: approve + burn only after registration
+  C->>A: persist burn hash + complete BridgeResult
+  C->>P: retry the same BridgeResult after recoverable failure
 ```
 
-The first valid attempt permanently locks the customer and Arc refund address. Expired attempts can be replaced only by the same customer/refund pair. A merchant cannot supply or redirect the refund recipient.
+The first onchain-valid attempt permanently locks the customer and Arc refund address. Expired registered attempts can be replaced only by that same customer/refund pair. An expired quote that was never registered may be discarded safely. A merchant cannot supply or redirect the refund recipient.
 
 ## Contract relationships
 
@@ -75,4 +77,5 @@ classDiagram
 - The browser signs merchant Arc transactions and customer source-chain CCTP transactions.
 - The worker may sign only permissionless `settle()` calls; it never holds customer funds.
 - Forwarding removes destination-mint signer and gas requirements.
+- The worker treats source receipts, raw CCTP messages, and Arc USDC logs as the settlement evidence; an Iris `forwardTxHash` alone is insufficient.
 - Webhook delivery begins only after onchain-derived state changes.

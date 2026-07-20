@@ -21,6 +21,7 @@
   "dependencies": {
     "@arc-checkout/chain-config": "workspace:*",
     "@arc-checkout/shared": "workspace:*",
+    "viem": "^2.55.4",
     "zod": "^3.25.56"
   },
   "devDependencies": {

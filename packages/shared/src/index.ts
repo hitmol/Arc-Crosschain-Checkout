@@ -39,6 +39,7 @@ export const paymentIntentInputSchema = z.object({
 });
 
 export const paymentAttemptInputSchema = z.object({
+  quoteId: z.string().uuid(),
   attemptId: bytes32Schema,
   invoiceVault: addressSchema,
   orderId: orderIdSchema,
@@ -68,6 +69,21 @@ export const paymentAttemptInputSchema = z.object({
     .optional(),
 });
 
+export const paymentAttemptProgressSchema = z.object({
+  status: z.enum(["REGISTERED", "APPROVING", "BURN_SUBMITTED", "RECOVERABLE"]),
+  registeredTransactionHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/)
+    .optional(),
+  sourceTransactionHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/)
+    .optional(),
+  bridgeResult: z.record(z.unknown()).optional(),
+  errorCode: z.string().trim().max(80).optional(),
+  errorMessage: z.string().trim().max(500).optional(),
+});
+
 export const webhookInputSchema = z.object({
   merchantAddress: addressSchema,
   url: z.string().url().max(2048),
@@ -87,6 +103,9 @@ export const webhookInputSchema = z.object({
 
 export type PaymentIntentInput = z.infer<typeof paymentIntentInputSchema>;
 export type PaymentAttemptInput = z.infer<typeof paymentAttemptInputSchema>;
+export type PaymentAttemptProgress = z.infer<
+  typeof paymentAttemptProgressSchema
+>;
 export type WebhookInput = z.infer<typeof webhookInputSchema>;
 
 export type PaymentStatus =

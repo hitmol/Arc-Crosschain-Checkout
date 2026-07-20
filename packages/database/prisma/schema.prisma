@@ -25,6 +25,7 @@ enum AttemptStatus {
   BURN_SUBMITTED
   SOURCE_CONFIRMED
   ATTESTING
+  RECOVERABLE
   ARC_MINTED
   SETTLING
   SETTLED
@@ -84,6 +85,7 @@ model PaymentIntent {
   merchantId                String
   merchant                  Merchant           @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   attempts                  PaymentAttempt[]
+  quotes                    PaymentQuote[]
   transactions              ChainTransaction[]
 
   @@unique([merchantId, orderId])
@@ -113,18 +115,60 @@ model PaymentAttempt {
   authorizationDigest   String?
   signature             String?
   registeredTransactionHash String?
+  clientSecretHash       String?
+  bridgeResult           Json?
+  bridgeRecoverable      Boolean       @default(false)
   status                AttemptStatus @default(QUOTED)
   sourceTransactionHash String?       @unique
   cctpMessageId         String?       @unique
+  sourceDomain          Int?
+  destinationDomain     Int?
+  messageHash           String?       @unique
+  eventNonce            String?
+  burnToken             String?
+  mintRecipient         String?
+  burnAmount            BigInt?
+  mintedAmount          BigInt?
+  finalityThreshold     Int?
+  sourceSender          String?
+  forwardState          String?
+  forwardTxHash         String?       @unique
+  cctpMessage           String?
+  cctpAttestation       String?
   errorCode             String?
   errorMessage          String?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
   paymentIntentId       String
   paymentIntent         PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  quoteId               String?       @unique
+  quote                 PaymentQuote? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
 
   @@index([status, updatedAt])
   @@index([paymentIntentId, active])
+  @@unique([sourceDomain, eventNonce])
+}
+
+model PaymentQuote {
+  id                         String         @id @default(uuid())
+  sourceChainId              Int
+  destinationChainId         Int            @default(5042002)
+  requestedDestinationAmount BigInt
+  protocolFee                BigInt
+  forwardFee                 BigInt
+  feeBuffer                  BigInt
+  maxFee                     BigInt
+  maximumSourceAmount        BigInt
+  finalityThreshold          Int
+  transferSpeed              String
+  expiresAt                  DateTime
+  usedAt                     DateTime?
+  createdAt                  DateTime       @default(now())
+  paymentIntentId            String
+  paymentIntent              PaymentIntent  @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  attempt                    PaymentAttempt?
+
+  @@index([paymentIntentId, expiresAt])
 }
 
 model ChainTransaction {

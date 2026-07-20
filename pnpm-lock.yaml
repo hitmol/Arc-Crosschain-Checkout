@@ -201,6 +201,9 @@ importers:
       '@arc-checkout/shared':
         specifier: workspace:*
         version: link:../shared
+      viem:
+        specifier: ^2.55.4
+        version: 2.55.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
       zod:
         specifier: ^3.25.56
         version: 3.25.76
@@ -1959,7 +1962,7 @@ packages:
     resolution: {integrity: sha512-PjDse7RzhcPkIJwy5t7KPWQSZ9cAbzQXcafsetQoD7sOJRQlGikNbx7yZp2OotDnJyrDcbyRq3Ttb18iYOqkxA==}
 
   forge-std@https://codeload.github.com/foundry-rs/forge-std/tar.gz/77041d2ce690e692d6e03cc812b57d1ddaa4d505:
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/foundry-rs/forge-std/tar.gz/77041d2ce690e692d6e03cc812b57d1ddaa4d505}
+    resolution: {gitHosted: true, integrity: sha512-AGU8gagr4jpMjZH/XWQlHyX0RdsErn86kGy34EpQYo07olNUIzPlOvo+wVzoR1RqaI3HmXsrXNQJd2QQD5PtjQ==, tarball: https://codeload.github.com/foundry-rs/forge-std/tar.gz/77041d2ce690e692d6e03cc812b57d1ddaa4d505}
     version: 1.9.7
 
   form-data@4.0.6:

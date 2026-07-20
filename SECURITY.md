@@ -12,7 +12,9 @@ The factory owner may pause only new invoice creation. The registry owner may de
 
 Invoice creation does not set a refund recipient. Before any supported CCTP burn, the payer signs an EIP-712 `PaymentAuthorization` whose domain is `Arc Crosschain Checkout`, version `1`, Arc chain ID `5042002`, and the deterministic invoice vault. The signed message binds the attempt ID, source and destination chains, vault, order ID, payer, customer Arc refund address, destination amount, maximum source amount, quote expiry, nonce, and attempt expiry.
 
-The first valid authorization permanently locks the payer and refund address. An expired attempt may be replaced only by the same payer using the same refund address and a fresh nonce/attempt ID. Used nonces and attempt IDs cannot be replayed. Refunds remain on Arc and are never automatically bridged to the source chain.
+The first valid onchain authorization permanently locks the payer and refund address. An expired registered attempt may be replaced only by the same payer using the same refund address and a fresh nonce/attempt ID. Used nonces and attempt IDs cannot be replayed. Refunds remain on Arc and are never automatically bridged to the source chain.
+
+Quotes are issued and stored by the API, expire quickly, and are claimed atomically once. The signed attempt must be persisted before Arc registration and any source burn. Browser progress updates require an attempt-scoped opaque secret whose hash alone is stored; that secret cannot authorize a payment or move funds.
 
 ## Fund safety
 
@@ -23,10 +25,11 @@ The first valid authorization permanently locks the payer and refund address. An
 - After expiry, anyone can execute the Arc-side refund.
 - Pause never blocks an existing vault's settlement or refund.
 - Unsupported tokens may be recovered by the merchant; vault USDC cannot use that path.
+- A source burn is accepted only after receipt success, required confirmations, and direct payer-sender verification. The raw CCTP V2 message must match the authorized route, contracts, token, vault, payer, amount, maximum fee, finality, and forwarding hook. An Arc mint additionally requires a successful receipt and exact USDC transfer log; `forwardTxHash` alone is not settlement evidence.
 
 ## Backend and webhooks
 
-All request input is runtime-validated. Public IDs are UUIDs. Merchant mutations require a short-lived wallet-signature session or a hashed, scoped API key. Customer attempts require a valid EIP-712 payer signature. Webhook secrets are AES-256-GCM encrypted, destinations are HTTPS/allowlisted and checked against private-address SSRF, signatures cover `timestamp.rawBody`, and retries are bounded.
+All request input is runtime-validated. Public IDs are UUIDs. Merchant mutations require a short-lived wallet-signature session or a hashed, scoped API key. Customer attempts require a valid EIP-712 payer signature plus the matching unexpired server quote. App Kit recovery persists and resumes the same successful-burn result instead of creating another burn. Webhook secrets are AES-256-GCM encrypted, destinations are HTTPS/allowlisted and checked against private-address SSRF, signatures cover `timestamp.rawBody`, and retries are bounded.
 
 ## Known limitations
 
