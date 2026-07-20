@@ -1,0 +1,25 @@
+FROM node:24-bookworm-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/worker/package.json apps/worker/package.json
+COPY packages/chain-config/package.json packages/chain-config/package.json
+COPY packages/cctp/package.json packages/cctp/package.json
+COPY packages/database/package.json packages/database/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN pnpm install --frozen-lockfile
+
+COPY apps/worker apps/worker
+COPY packages/chain-config packages/chain-config
+COPY packages/cctp packages/cctp
+COPY packages/database packages/database
+COPY packages/shared packages/shared
+RUN pnpm --filter @arc-checkout/worker... build
+
+EXPOSE 4001
+HEALTHCHECK --interval=30s --timeout=12s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.WORKER_PORT||4001)+'/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+CMD ["pnpm", "--filter", "@arc-checkout/worker", "start"]

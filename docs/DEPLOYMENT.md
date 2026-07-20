@@ -46,6 +46,14 @@ Deploy four separate components:
 
 Run `pnpm --filter @arc-checkout/database migrate:deploy` against the production database before rolling out API or worker.
 
+`Dockerfile.api` and `Dockerfile.worker` build the two Node services from the monorepo and define health checks. `vercel.json` builds the Next.js workspace from the repository root so its shared workspace packages remain available. Validate each secret set before rollout:
+
+```text
+pnpm validate:env web
+pnpm validate:env api
+pnpm validate:env worker
+```
+
 ### Frontend environment
 
 ```text
