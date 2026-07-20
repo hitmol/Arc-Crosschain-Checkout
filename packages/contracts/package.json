@@ -8,7 +8,7 @@
     "lint": "node ../../scripts/forge.mjs fmt --check",
     "typecheck": "node ../../scripts/forge.mjs build",
     "test": "node ../../scripts/forge.mjs test -vvv",
-    "coverage": "node ../../scripts/forge.mjs coverage --report summary",
+    "coverage": "node ../../scripts/forge.mjs coverage --report summary --ir-minimum",
     "deploy": "forge script script/Deploy.s.sol:Deploy --rpc-url $ARC_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify"
   },
   "dependencies": {

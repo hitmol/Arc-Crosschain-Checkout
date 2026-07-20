@@ -31,7 +31,6 @@ const docker = spawnSync(
     "-w",
     "/workspace/packages/contracts",
     "ghcr.io/foundry-rs/foundry:stable",
-    "forge",
     ...args,
   ],
   { stdio: "inherit", shell: false },
