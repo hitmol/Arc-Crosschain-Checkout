@@ -52,6 +52,7 @@ import {
   type AuthPrincipal,
 } from "./auth.js";
 import { jsonSafe } from "./serialize.js";
+import { getMerchantDashboard, getVerifiedReceipt } from "./payment-views.js";
 import { verifyPaymentAuthorization } from "./payment-authorization.js";
 import {
   assertClientStatusTransition,
@@ -575,6 +576,71 @@ export function createApp(): Application {
         return;
       }
       response.json(jsonSafe(merchant));
+    }),
+  );
+
+  app.get(
+    "/api/dashboard",
+    merchantGuard("merchant:read"),
+    asyncRoute(async (request, response) => {
+      const input = z
+        .object({
+          merchantAddress: addressSchema,
+          page: z.coerce.number().int().positive().default(1),
+          pageSize: z.coerce.number().int().min(1).max(50).default(20),
+          status: z
+            .enum([
+              "OPEN",
+              "PARTIALLY_FUNDED",
+              "FUNDED",
+              "SETTLING",
+              "SETTLED",
+              "REFUNDED",
+              "CANCELLED",
+              "EXPIRED",
+            ])
+            .optional(),
+          sourceChainId: z.coerce.number().int().positive().optional(),
+          search: z.string().trim().min(1).max(100).optional(),
+        })
+        .parse(request.query);
+      assertRequestedMerchant(response, input.merchantAddress);
+      const merchant = await prisma.merchant.findUnique({
+        where: { walletAddress: input.merchantAddress.toLowerCase() },
+        select: { id: true },
+      });
+      if (!merchant) {
+        response.status(404).json({ error: "Merchant not found" });
+        return;
+      }
+      const dashboard = await getMerchantDashboard(merchant.id, {
+        page: input.page,
+        pageSize: input.pageSize,
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.sourceChainId ? { sourceChainId: input.sourceChainId } : {}),
+        ...(input.search ? { search: input.search } : {}),
+      });
+      response.setHeader("Cache-Control", "no-store");
+      response.json(jsonSafe(dashboard));
+    }),
+  );
+
+  app.get(
+    "/api/receipts/:invoiceSlug",
+    asyncRoute(async (request, response) => {
+      const invoiceSlug = z
+        .string()
+        .trim()
+        .min(1)
+        .max(120)
+        .parse(request.params.invoiceSlug);
+      const receipt = await getVerifiedReceipt(invoiceSlug);
+      if (!receipt) {
+        response.status(404).json({ error: "Receipt not found" });
+        return;
+      }
+      response.setHeader("Cache-Control", "no-store");
+      response.json(jsonSafe(receipt));
     }),
   );
 
