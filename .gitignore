@@ -7,6 +7,9 @@ node_modules/
 dist/
 coverage/
 lcov.info
+playwright-report/
+test-results/
+output/
 out/
 cache/
 broadcast/

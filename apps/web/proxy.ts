@@ -3,6 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const development = process.env.NODE_ENV !== "production";
+  let apiOrigin = "";
+  try {
+    apiOrigin = new URL(process.env.NEXT_PUBLIC_API_URL ?? "").origin;
+  } catch {
+    // A missing URL is validated by the production deployment gate.
+  }
   const scriptSrc = development
     ? `'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`
     : `'self' 'nonce-${nonce}' 'strict-dynamic'`;
@@ -12,7 +18,7 @@ export function proxy(request: NextRequest) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' https://iris-api-sandbox.circle.com https://rpc.testnet.arc.network https://sepolia.base.org https://ethereum-sepolia-rpc.publicnode.com wss://rpc.testnet.arc.network",
+    `connect-src 'self' ${apiOrigin} https://iris-api-sandbox.circle.com https://rpc.testnet.arc.network https://sepolia.base.org https://ethereum-sepolia-rpc.publicnode.com wss://rpc.testnet.arc.network`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
