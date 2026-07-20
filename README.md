@@ -56,7 +56,7 @@ docs                    architecture, deployment and submission package
 
 ## Local demo
 
-Requirements: Node 20.9+, pnpm 11, Docker, and Foundry for contract tests.
+Requirements: Node 22.13+, pnpm 11, Docker, and Foundry for contract tests.
 
 ```bash
 cp .env.example .env
