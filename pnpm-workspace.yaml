@@ -1,0 +1,23 @@
+packages:
+  - apps/*
+  - packages/*
+
+overrides:
+  "jayson@4.3.0>uuid": 11.1.1
+  "postcss@8.4.31": 8.5.20
+
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  bufferutil: true
+  esbuild: true
+  prisma: true
+  sharp: true
+  utf-8-validate: true
+
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - esbuild
+  - prisma
+  - sharp

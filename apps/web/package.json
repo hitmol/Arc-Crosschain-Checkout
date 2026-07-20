@@ -1,0 +1,39 @@
+{
+  "name": "@arc-checkout/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint app components lib --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@arc-checkout/chain-config": "workspace:*",
+    "@arc-checkout/shared": "workspace:*",
+    "@circle-fin/adapter-viem-v2": "^1.14.0",
+    "@circle-fin/app-kit": "^1.10.0",
+    "@tanstack/react-query": "^5.80.7",
+    "lucide-react": "^0.513.0",
+    "next": "^16.2.10",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "viem": "^2.55.4",
+    "wagmi": "^3.7.3",
+    "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@tailwindcss/postcss": "^4.1.8",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  }
+}

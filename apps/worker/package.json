@@ -1,0 +1,27 @@
+{
+  "name": "@arc-checkout/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/worker.ts",
+    "start": "node dist/worker.js",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@arc-checkout/chain-config": "workspace:*",
+    "@arc-checkout/cctp": "workspace:*",
+    "@arc-checkout/database": "workspace:*",
+    "@arc-checkout/shared": "workspace:*",
+    "pino": "^9.7.0",
+    "viem": "^2.31.0",
+    "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "vitest": "^3.2.3"
+  }
+}

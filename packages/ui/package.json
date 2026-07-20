@@ -1,0 +1,22 @@
+{
+  "name": "@arc-checkout/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "react": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "vitest": "^3.2.3"
+  }
+}

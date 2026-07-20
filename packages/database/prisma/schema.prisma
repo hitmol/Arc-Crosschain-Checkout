@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentStatus {
+  OPEN
+  PARTIALLY_FUNDED
+  FUNDED
+  SETTLING
+  SETTLED
+  REFUNDED
+  CANCELLED
+  EXPIRED
+}
+
+enum AttemptStatus {
+  QUOTED
+  APPROVING
+  BURN_SUBMITTED
+  SOURCE_CONFIRMED
+  ATTESTING
+  ARC_MINTED
+  SETTLING
+  SETTLED
+  FAILED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  RETRYING
+  FAILED
+}
+
+model Merchant {
+  id            String          @id @default(uuid())
+  walletAddress String          @unique
+  payoutAddress String
+  metadataHash  String?
+  displayName   String?
+  active        Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  intents       PaymentIntent[]
+  webhooks      WebhookEndpoint[]
+}
+
+model PaymentIntent {
+  id                    String             @id @default(uuid())
+  slug                  String             @unique
+  orderId               String             @unique
+  orderIdBytes32        String             @unique
+  expectedAmount        BigInt
+  fundedAmount          BigInt             @default(0)
+  refundAddress         String
+  payoutAddress         String
+  vaultAddress          String?            @unique
+  metadataHash          String?
+  description           String?
+  status                PaymentStatus      @default(OPEN)
+  expiresAt             DateTime
+  createTransactionHash String?
+  arcMintTransactionHash String?
+  settlementTransactionHash String?
+  settledAt             DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  merchantId            String
+  merchant              Merchant           @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  attempts              PaymentAttempt[]
+  transactions          ChainTransaction[]
+
+  @@index([merchantId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model PaymentAttempt {
+  id                    String        @id @default(uuid())
+  sourceChainId         Int
+  customerAddress       String
+  quotedSourceAmount    BigInt
+  maxFee                BigInt?
+  status                AttemptStatus @default(QUOTED)
+  sourceTransactionHash String?
+  cctpMessageId         String?
+  errorCode             String?
+  errorMessage          String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  paymentIntentId       String
+  paymentIntent         PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
+}
+
+model ChainTransaction {
+  id              String        @id @default(uuid())
+  chainId         Int
+  transactionHash String
+  logIndex        Int           @default(0)
+  blockNumber     BigInt
+  type            String
+  observedAt      DateTime      @default(now())
+  paymentIntentId String
+  paymentIntent   PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+
+  @@unique([chainId, transactionHash, logIndex])
+}
+
+model WebhookEndpoint {
+  id              String            @id @default(uuid())
+  url             String
+  encryptedSecret String
+  events          String[]
+  active          Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  merchantId      String
+  merchant        Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  deliveries      WebhookDelivery[]
+
+  @@unique([merchantId, url])
+}
+
+model WebhookDelivery {
+  id                String                @id @default(uuid())
+  eventId           String                @unique
+  eventType         String
+  payload           Json
+  status            WebhookDeliveryStatus @default(PENDING)
+  attempts          Int                   @default(0)
+  lastStatusCode    Int?
+  lastError         String?
+  nextAttemptAt     DateTime               @default(now())
+  deliveredAt       DateTime?
+  createdAt         DateTime               @default(now())
+  webhookEndpointId String
+  webhookEndpoint   WebhookEndpoint        @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+}
+
+model IndexerCursor {
+  id          String   @id @default(uuid())
+  chainId     Int
+  stream      String
+  blockNumber BigInt
+  updatedAt   DateTime @updatedAt
+
+  @@unique([chainId, stream])
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid())
+  key         String
+  scope       String
+  response    Json
+  statusCode  Int
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  @@unique([key, scope])
+  @@index([expiresAt])
+}

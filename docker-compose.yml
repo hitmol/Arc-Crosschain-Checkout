@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: arc
+      POSTGRES_PASSWORD: arc
+      POSTGRES_DB: arc_checkout
+    ports:
+      - "5432:5432"
+    volumes:
+      - arc_checkout_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arc -d arc_checkout"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  arc_checkout_postgres:
