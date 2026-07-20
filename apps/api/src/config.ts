@@ -15,8 +15,13 @@ const configSchema = z.object({
     .string()
     .url()
     .default("https://iris-api-sandbox.circle.com"),
+  ARC_RPC_URL: z.string().url().default("https://rpc.testnet.arc.network"),
+  NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .optional(),
   WEBHOOK_ENCRYPTION_KEY: z.string().optional(),
-  INTERNAL_API_SECRET: z.string().min(24).optional(),
+  AUTH_DOMAIN: z.string().min(1).optional(),
   ALLOWED_WEBHOOK_HOSTS: z.string().default(""),
   LOG_LEVEL: z.string().default("info"),
 });
@@ -27,11 +32,6 @@ if (config.NODE_ENV === "production" && config.DEMO_MODE) {
   throw new Error("DEMO_MODE cannot be enabled when NODE_ENV=production");
 }
 
-if (
-  !config.DEMO_MODE &&
-  (!config.WEBHOOK_ENCRYPTION_KEY || !config.INTERNAL_API_SECRET)
-) {
-  throw new Error(
-    "WEBHOOK_ENCRYPTION_KEY and INTERNAL_API_SECRET are required outside demo mode",
-  );
+if (!config.DEMO_MODE && !config.WEBHOOK_ENCRYPTION_KEY) {
+  throw new Error("WEBHOOK_ENCRYPTION_KEY is required outside demo mode");
 }

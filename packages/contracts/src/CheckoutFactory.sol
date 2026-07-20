@@ -24,7 +24,7 @@ contract CheckoutFactory is Ownable2Step, Pausable {
     address public immutable vaultImplementation;
     address public immutable usdc;
 
-    mapping(bytes32 orderId => address vault) public vaultByOrderId;
+    mapping(address merchant => mapping(bytes32 orderId => address vault)) public vaultByOrderId;
     mapping(address merchant => address[] vaults) private _merchantVaults;
 
     event PaymentIntentCreated(
@@ -68,7 +68,7 @@ contract CheckoutFactory is Ownable2Step, Pausable {
         if (expiresAt < block.timestamp + MIN_EXPIRY || expiresAt > block.timestamp + MAX_EXPIRY) {
             revert InvalidExpiry();
         }
-        if (vaultByOrderId[orderId] != address(0)) revert DuplicateOrderId();
+        if (vaultByOrderId[msg.sender][orderId] != address(0)) revert DuplicateOrderId();
 
         IMerchantRegistry.Merchant memory merchant = merchantRegistry.merchantOf(msg.sender);
         if (merchant.owner != msg.sender || !merchant.active) {
@@ -94,7 +94,7 @@ contract CheckoutFactory is Ownable2Step, Pausable {
                 metadataHash
             );
 
-        vaultByOrderId[orderId] = vault;
+        vaultByOrderId[msg.sender][orderId] = vault;
         _merchantVaults[msg.sender].push(vault);
         emit PaymentIntentCreated(
             orderId,

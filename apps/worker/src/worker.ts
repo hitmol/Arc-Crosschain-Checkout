@@ -19,6 +19,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 import { z } from "zod";
+import { indexArcEvents } from "./arc-indexer.js";
 
 const env = z
   .object({
@@ -34,10 +35,16 @@ const env = z
       .string()
       .regex(/^0x[a-fA-F0-9]{64}$/)
       .optional(),
-    NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS: z
+    ARC_MERCHANT_REGISTRY_ADDRESS: z
       .string()
       .regex(/^0x[a-fA-F0-9]{40}$/)
       .optional(),
+    ARC_CHECKOUT_FACTORY_ADDRESS: z
+      .string()
+      .regex(/^0x[a-fA-F0-9]{40}$/)
+      .optional(),
+    ARC_DEPLOYMENT_BLOCK: z.coerce.bigint().nonnegative().optional(),
+    ARC_INDEXER_PAGE_SIZE: z.coerce.bigint().positive().default(1_000n),
     WEBHOOK_ENCRYPTION_KEY: z.string().optional(),
     DEMO_MODE: z
       .enum(["true", "false"])
@@ -194,6 +201,7 @@ async function reconcileVaults() {
     take: 100,
   });
   for (const intent of intents) {
+    let settlementLockId: string | null = null;
     try {
       const address = intent.vaultAddress as Address;
       const [balance, state] = await Promise.all([
@@ -210,16 +218,9 @@ async function reconcileVaults() {
       ]);
       const stateNumber = Number(state);
       if (stateNumber === 3) {
-        const updated = await prisma.paymentIntent.update({
-          where: { id: intent.id },
-          data: {
-            status: "SETTLED",
-            fundedAmount: balance,
-            settledAt: intent.settledAt ?? new Date(),
-          },
-        });
-        if (intent.status !== "SETTLED")
-          await queueWebhook(updated, "payment.settled");
+        // The finalized PaymentSettled event is authoritative. The current
+        // vault balance is normally zero after settlement and must never be
+        // used as the funded amount.
         continue;
       }
       const nextStatus =
@@ -230,9 +231,32 @@ async function reconcileVaults() {
             : "FUNDED";
       await prisma.paymentIntent.update({
         where: { id: intent.id },
-        data: { fundedAmount: balance, status: nextStatus },
+        data: {
+          fundedAmount: balance,
+          status: intent.status === "SETTLING" ? "SETTLING" : nextStatus,
+        },
       });
       if (nextStatus === "FUNDED" && walletClient && account) {
+        settlementLockId = crypto.randomUUID();
+        const staleBefore = new Date(Date.now() - 2 * 60_000);
+        const claimed = await prisma.paymentIntent.updateMany({
+          where: {
+            id: intent.id,
+            OR: [
+              { status: "FUNDED", settlementLockId: null },
+              { status: "SETTLING", settlementLockedAt: { lt: staleBefore } },
+            ],
+          },
+          data: {
+            status: "SETTLING",
+            settlementLockId,
+            settlementLockedAt: new Date(),
+          },
+        });
+        if (claimed.count !== 1) {
+          settlementLockId = null;
+          continue;
+        }
         const hash = await walletClient.writeContract({
           address,
           abi: vaultAbi,
@@ -245,18 +269,36 @@ async function reconcileVaults() {
           confirmations: 1,
         });
         if (receipt.status === "success") {
-          const updated = await prisma.paymentIntent.update({
+          await prisma.paymentIntent.update({
             where: { id: intent.id },
             data: {
-              status: "SETTLED",
+              status: "SETTLING",
               settlementTransactionHash: hash,
-              settledAt: new Date(),
             },
           });
-          await queueWebhook(updated, "payment.settled");
+        } else {
+          await prisma.paymentIntent.updateMany({
+            where: { id: intent.id, settlementLockId },
+            data: {
+              status: "FUNDED",
+              settlementLockId: null,
+              settlementLockedAt: null,
+            },
+          });
+          settlementLockId = null;
         }
       }
     } catch (error) {
+      if (settlementLockId) {
+        await prisma.paymentIntent.updateMany({
+          where: { id: intent.id, settlementLockId },
+          data: {
+            status: "FUNDED",
+            settlementLockId: null,
+            settlementLockedAt: null,
+          },
+        });
+      }
       logger.warn(
         {
           invoiceId: intent.id,
@@ -414,6 +456,22 @@ async function reconcileLocalDemo() {
 async function tick() {
   if (env.DEMO_MODE) await reconcileLocalDemo();
   else {
+    if (
+      env.ARC_MERCHANT_REGISTRY_ADDRESS &&
+      env.ARC_CHECKOUT_FACTORY_ADDRESS &&
+      env.ARC_DEPLOYMENT_BLOCK !== undefined
+    ) {
+      const indexed = await indexArcEvents({
+        client: publicClient,
+        chainId: arcTestnet.id,
+        merchantRegistryAddress: env.ARC_MERCHANT_REGISTRY_ADDRESS as Address,
+        checkoutFactoryAddress: env.ARC_CHECKOUT_FACTORY_ADDRESS as Address,
+        deploymentBlock: env.ARC_DEPLOYMENT_BLOCK,
+        pageSize: env.ARC_INDEXER_PAGE_SIZE,
+      });
+      if (indexed.logCount > 0)
+        logger.info(indexed, "indexed finalized Arc events");
+    }
     await reconcileCctpAttempts();
     await reconcileVaults();
   }
@@ -424,6 +482,11 @@ logger.info(
   {
     mode: env.DEMO_MODE ? "demo" : "testnet",
     automatedSettlement: Boolean(walletClient),
+    arcIndexer: Boolean(
+      env.ARC_MERCHANT_REGISTRY_ADDRESS &&
+      env.ARC_CHECKOUT_FACTORY_ADDRESS &&
+      env.ARC_DEPLOYMENT_BLOCK !== undefined,
+    ),
   },
   "settlement worker started",
 );

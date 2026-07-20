@@ -38,43 +38,55 @@ enum WebhookDeliveryStatus {
 }
 
 model Merchant {
-  id            String          @id @default(uuid())
-  walletAddress String          @unique
+  id            String             @id @default(uuid())
+  walletAddress String             @unique
   payoutAddress String
   metadataHash  String?
   displayName   String?
-  active        Boolean         @default(true)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  active        Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
   intents       PaymentIntent[]
   webhooks      WebhookEndpoint[]
+  apiKeys       MerchantApiKey[]
+  transactions  ChainTransaction[]
 }
 
 model PaymentIntent {
-  id                    String             @id @default(uuid())
-  slug                  String             @unique
-  orderId               String             @unique
-  orderIdBytes32        String             @unique
-  expectedAmount        BigInt
-  fundedAmount          BigInt             @default(0)
-  refundAddress         String
-  payoutAddress         String
-  vaultAddress          String?            @unique
-  metadataHash          String?
-  description           String?
-  status                PaymentStatus      @default(OPEN)
-  expiresAt             DateTime
-  createTransactionHash String?
-  arcMintTransactionHash String?
+  id                        String             @id @default(uuid())
+  slug                      String             @unique
+  orderId                   String
+  orderIdBytes32            String
+  expectedAmount            BigInt
+  fundedAmount              BigInt             @default(0)
+  refundAddress             String
+  payoutAddress             String
+  vaultAddress              String?            @unique
+  metadataHash              String?
+  description               String?
+  status                    PaymentStatus      @default(OPEN)
+  expiresAt                 DateTime
+  createChainId             Int                @default(5042002)
+  createTransactionHash     String?
+  arcMintTransactionHash    String?
   settlementTransactionHash String?
-  settledAt             DateTime?
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
-  merchantId            String
-  merchant              Merchant           @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  attempts              PaymentAttempt[]
-  transactions          ChainTransaction[]
+  settlementLockId          String?
+  settlementLockedAt        DateTime?
+  settlementMerchantAmount  BigInt?
+  protocolFeeAmount         BigInt?
+  excessAmount              BigInt?
+  refundedAmount            BigInt?
+  settledAt                 DateTime?
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+  merchantId                String
+  merchant                  Merchant           @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  attempts                  PaymentAttempt[]
+  transactions              ChainTransaction[]
 
+  @@unique([merchantId, orderId])
+  @@unique([merchantId, orderIdBytes32])
+  @@unique([createChainId, createTransactionHash])
   @@index([merchantId, createdAt])
   @@index([status, expiresAt])
 }
@@ -99,17 +111,64 @@ model PaymentAttempt {
 }
 
 model ChainTransaction {
-  id              String        @id @default(uuid())
+  id              String         @id @default(uuid())
   chainId         Int
   transactionHash String
-  logIndex        Int           @default(0)
+  logIndex        Int            @default(0)
   blockNumber     BigInt
+  blockHash       String
+  contractAddress String
   type            String
-  observedAt      DateTime      @default(now())
-  paymentIntentId String
-  paymentIntent   PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  payload         Json
+  observedAt      DateTime       @default(now())
+  merchantId      String?
+  merchant        Merchant?      @relation(fields: [merchantId], references: [id], onDelete: SetNull)
+  paymentIntentId String?
+  paymentIntent   PaymentIntent? @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
 
   @@unique([chainId, transactionHash, logIndex])
+}
+
+model AuthChallenge {
+  id            String    @id @default(uuid())
+  walletAddress String
+  chainId       Int
+  domain        String
+  nonceHash     String    @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([walletAddress, expiresAt])
+}
+
+model MerchantSession {
+  id            String    @id @default(uuid())
+  tokenHash     String    @unique
+  walletAddress String
+  chainId       Int
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+
+  @@index([walletAddress, expiresAt])
+}
+
+model MerchantApiKey {
+  id         String    @id @default(uuid())
+  name       String
+  keyPrefix  String
+  keyHash    String    @unique
+  scopes     String[]
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  merchantId String
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, revokedAt])
 }
 
 model WebhookEndpoint {
@@ -136,11 +195,11 @@ model WebhookDelivery {
   attempts          Int                   @default(0)
   lastStatusCode    Int?
   lastError         String?
-  nextAttemptAt     DateTime               @default(now())
+  nextAttemptAt     DateTime              @default(now())
   deliveredAt       DateTime?
-  createdAt         DateTime               @default(now())
+  createdAt         DateTime              @default(now())
   webhookEndpointId String
-  webhookEndpoint   WebhookEndpoint        @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+  webhookEndpoint   WebhookEndpoint       @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
 
   @@index([status, nextAttemptAt])
 }
@@ -156,13 +215,13 @@ model IndexerCursor {
 }
 
 model IdempotencyRecord {
-  id          String   @id @default(uuid())
-  key         String
-  scope       String
-  response    Json
-  statusCode  Int
-  createdAt   DateTime @default(now())
-  expiresAt   DateTime
+  id         String   @id @default(uuid())
+  key        String
+  scope      String
+  response   Json
+  statusCode Int
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
 
   @@unique([key, scope])
   @@index([expiresAt])

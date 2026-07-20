@@ -14,9 +14,19 @@ export const usdcAmountSchema = z
   )
   .refine((value) => parseUsdc(value) > 0n, "Amount must be greater than zero");
 
+export const orderIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine(
+    (value) => new TextEncoder().encode(value).length <= 32,
+    "Order ID is longer than 32 UTF-8 bytes",
+  );
+
 export const paymentIntentInputSchema = z.object({
   merchantAddress: addressSchema,
-  orderId: z.string().trim().min(1).max(80),
+  orderId: orderIdSchema,
   amount: usdcAmountSchema,
   expiresAt: z.string().datetime(),
   refundAddress: addressSchema,

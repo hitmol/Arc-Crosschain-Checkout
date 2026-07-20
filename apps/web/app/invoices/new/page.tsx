@@ -1,17 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { decodeEventLog, keccak256, toBytes, zeroHash } from "viem";
+import { useEffect, useMemo, useState } from "react";
+import { keccak256, toBytes, zeroHash } from "viem";
 import {
   useAccount,
   useChainId,
   usePublicClient,
+  useSignMessage,
   useSwitchChain,
   useWriteContract,
 } from "wagmi";
 import { arcTestnet } from "viem/chains";
 import { parseUsdc, orderIdToBytes32 } from "@arc-checkout/shared";
 import { apiFetch } from "@/lib/api";
+import { ensureMerchantSession } from "@/lib/merchant-auth";
 import { checkoutFactoryAbi } from "@/lib/contracts";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -25,15 +27,31 @@ type Created = {
   mode: string;
 };
 
+type PendingImport = {
+  transactionHash: `0x${string}`;
+  merchantAddress: `0x${string}`;
+  orderId: string;
+  amount: string;
+  expiresAt: string;
+  refundAddress: `0x${string}`;
+  description?: string;
+};
+
+const pendingImportKey = "arc-checkout.pending-invoice-import";
+
 export default function CreateInvoicePage() {
   const { address } = useAccount();
   const chainId = useChainId();
   const publicClient = usePublicClient({ chainId: arcTestnet.id });
   const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const { signMessageAsync } = useSignMessage();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<Created | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(
+    null,
+  );
   const [form, setForm] = useState({
     orderId: "ORDER-1042",
     amount: "125.00",
@@ -45,8 +63,46 @@ export default function CreateInvoicePage() {
     () => new Date(Date.now() + Number(form.hours || 1) * 3_600_000),
     [form.hours],
   );
+  useEffect(() => {
+    const stored = window.localStorage.getItem(pendingImportKey);
+    if (!stored) return;
+    try {
+      setPendingImport(JSON.parse(stored) as PendingImport);
+    } catch {
+      window.localStorage.removeItem(pendingImportKey);
+    }
+  }, []);
   function set(key: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function importConfirmedIntent(pending: PendingImport) {
+    const payload = await apiFetch<Created>("/api/payment-intents/reconcile", {
+      method: "POST",
+      headers: { "idempotency-key": pending.transactionHash },
+      body: JSON.stringify(pending),
+    });
+    window.localStorage.removeItem(pendingImportKey);
+    setPendingImport(null);
+    setCreated(payload);
+  }
+
+  async function recoverImport() {
+    if (!pendingImport) return;
+    setBusy(true);
+    setError("");
+    try {
+      await ensureMerchantSession(pendingImport.merchantAddress, (message) =>
+        signMessageAsync({ message }),
+      );
+      await importConfirmedIntent(pendingImport);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Invoice recovery failed",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit(event: React.FormEvent) {
@@ -55,7 +111,10 @@ export default function CreateInvoicePage() {
     setError("");
     try {
       if (!address) throw new Error("Connect the merchant wallet first");
-      let vaultAddress: string | undefined;
+      if (factoryAddress)
+        await ensureMerchantSession(address, (message) =>
+          signMessageAsync({ message }),
+        );
       let createTransactionHash: string | undefined;
       if (factoryAddress) {
         if (chainId !== arcTestnet.id)
@@ -78,23 +137,21 @@ export default function CreateInvoicePage() {
           hash: createTransactionHash as `0x${string}`,
           confirmations: 1,
         });
-        for (const log of receipt.logs) {
-          try {
-            const decoded = decodeEventLog({
-              abi: checkoutFactoryAbi,
-              data: log.data,
-              topics: log.topics,
-            });
-            if (decoded.eventName === "PaymentIntentCreated")
-              vaultAddress = decoded.args.vault;
-          } catch {
-            /* unrelated log */
-          }
-        }
-        if (!vaultAddress)
-          throw new Error(
-            "Arc confirmed the transaction, but the vault event was not found",
-          );
+        if (receipt.status !== "success")
+          throw new Error("Arc transaction did not succeed");
+        const pending: PendingImport = {
+          transactionHash: createTransactionHash as `0x${string}`,
+          merchantAddress: address,
+          orderId: form.orderId,
+          amount: form.amount,
+          expiresAt: expiresAt.toISOString(),
+          refundAddress: (form.refundAddress || address) as `0x${string}`,
+          ...(form.description ? { description: form.description } : {}),
+        };
+        window.localStorage.setItem(pendingImportKey, JSON.stringify(pending));
+        setPendingImport(pending);
+        await importConfirmedIntent(pending);
+        return;
       }
       const payload = await apiFetch<Created>("/api/payment-intents", {
         method: "POST",
@@ -106,8 +163,6 @@ export default function CreateInvoicePage() {
           expiresAt: expiresAt.toISOString(),
           refundAddress: form.refundAddress || address,
           description: form.description,
-          vaultAddress,
-          createTransactionHash,
         }),
       });
       setCreated(payload);
@@ -171,6 +226,22 @@ export default function CreateInvoicePage() {
         <div className="demo-banner">
           Local demo mode: the API creates a clearly labeled mock vault. Set the
           deployed factory address to create a real deterministic Arc vault.
+        </div>
+      )}
+      {pendingImport && (
+        <div className="message error">
+          Arc confirmed transaction {pendingImport.transactionHash}, but the API
+          import is still pending. Do not create another vault.
+          <div className="form-actions">
+            <button
+              className="button secondary"
+              type="button"
+              disabled={busy}
+              onClick={() => void recoverImport()}
+            >
+              Retry verified import
+            </button>
+          </div>
         </div>
       )}
       <div className="card">

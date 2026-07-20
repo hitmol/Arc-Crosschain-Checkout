@@ -12,7 +12,7 @@ Do not provide a private key in a command-line flag. The current repository is `
 
 ## Application
 
-Deploy `apps/web`, `apps/api`, `apps/worker`, and PostgreSQL as separate services. Run Prisma migrations before API/worker rollout. Set strong random `INTERNAL_API_SECRET` and a base64-encoded 32-byte `WEBHOOK_ENCRYPTION_KEY` through the platform secret manager. Configure a fixed canonical app origin and webhook allowlist. The worker settler key is optional.
+Deploy `apps/web`, `apps/api`, `apps/worker`, and PostgreSQL as separate services. Run Prisma migrations before API/worker rollout. Set a base64-encoded 32-byte `WEBHOOK_ENCRYPTION_KEY` through the platform secret manager, configure `AUTH_DOMAIN` to the canonical frontend host, and allow credentials only from `NEXT_PUBLIC_APP_URL`. Configure the Arc registry/factory addresses and deployment block for the worker indexer. The worker settler key is optional and should use managed signing in production.
 
 ## Checklist
 

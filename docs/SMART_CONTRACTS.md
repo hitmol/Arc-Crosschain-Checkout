@@ -10,7 +10,7 @@ Two-step ownership protects treasury and fee changes. The fee is capped at 500 b
 
 ## CheckoutFactory
 
-Uses OpenZeppelin `Clones.cloneDeterministic` with `keccak256(abi.encode(merchant, orderId))`. It rejects duplicate global order IDs, invalid amounts, zero refund addresses, inactive merchants, and expiry outside five minutes to 30 days. Pause applies only to creation.
+Uses OpenZeppelin `Clones.cloneDeterministic` with `keccak256(abi.encode(merchant, orderId))`. Order IDs are unique per merchant, so two merchants may use the same external order reference without sharing a vault. It rejects duplicate merchant/order pairs, invalid amounts, zero refund addresses, inactive merchants, and expiry outside five minutes to 30 days. Pause applies only to creation.
 
 ## PaymentVault
 

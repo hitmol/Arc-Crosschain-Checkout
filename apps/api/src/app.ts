@@ -21,12 +21,33 @@ import {
   webhookInputSchema,
 } from "@arc-checkout/shared";
 import { config } from "./config.js";
+import {
+  ReconciliationError,
+  verifyPaymentIntentTransaction,
+} from "./arc-reconciliation.js";
+import {
+  apiKeyScopes,
+  assertMerchantScope,
+  AUTH_CHAIN_ID,
+  AUTH_CHALLENGE_TTL_MS,
+  AUTH_COOKIE_NAME,
+  AUTH_SESSION_TTL_MS,
+  AuthError,
+  buildMerchantSignInMessage,
+  createApiKey,
+  createOpaqueToken,
+  hashOpaqueSecret,
+  parseCookieHeader,
+  requireScope,
+  verifyAuthChallenge,
+  type ApiKeyScope,
+  type AuthPrincipal,
+} from "./auth.js";
 import { jsonSafe } from "./serialize.js";
 import {
   assertSafeWebhookUrl,
   decryptSecret,
   encryptSecret,
-  safeSecretEqual,
   signWebhook,
 } from "./security.js";
 import { z } from "zod";
@@ -48,20 +69,89 @@ function asyncRoute(
     handler(request, response).catch(next);
 }
 
-function mutationGuard(
-  request: Request,
-  response: Response,
-  next: NextFunction,
-) {
+const appUrl = new URL(config.NEXT_PUBLIC_APP_URL);
+const authDomain = config.AUTH_DOMAIN ?? appUrl.host;
+
+async function authenticate(request: Request): Promise<AuthPrincipal | null> {
+  const sessionToken = parseCookieHeader(request.header("cookie")).get(
+    AUTH_COOKIE_NAME,
+  );
+  if (sessionToken) {
+    const session = await prisma.merchantSession.findUnique({
+      where: { tokenHash: hashOpaqueSecret(sessionToken) },
+    });
+    if (session && !session.revokedAt && session.expiresAt > new Date()) {
+      const merchant = await prisma.merchant.findUnique({
+        where: { walletAddress: session.walletAddress },
+        select: { id: true },
+      });
+      await prisma.merchantSession.update({
+        where: { id: session.id },
+        data: { lastSeenAt: new Date() },
+      });
+      return {
+        kind: "session",
+        walletAddress: session.walletAddress,
+        merchantId: merchant?.id ?? null,
+        scopes: apiKeyScopes,
+      };
+    }
+  }
+
+  const authorization = request.header("authorization");
+  if (!authorization?.startsWith("Bearer ")) return null;
+  const rawKey = authorization.slice("Bearer ".length).trim();
+  const apiKey = await prisma.merchantApiKey.findUnique({
+    where: { keyHash: hashOpaqueSecret(rawKey) },
+    include: { merchant: true },
+  });
   if (
-    config.DEMO_MODE ||
-    safeSecretEqual(
-      request.header("x-internal-api-secret"),
-      config.INTERNAL_API_SECRET,
-    )
+    !apiKey ||
+    apiKey.revokedAt ||
+    (apiKey.expiresAt && apiKey.expiresAt <= new Date())
   )
-    return next();
-  response.status(401).json({ error: "Merchant authentication is required" });
+    return null;
+  await prisma.merchantApiKey.update({
+    where: { id: apiKey.id },
+    data: { lastUsedAt: new Date() },
+  });
+  return {
+    kind: "api-key",
+    walletAddress: apiKey.merchant.walletAddress,
+    merchantId: apiKey.merchantId,
+    scopes: apiKey.scopes,
+  };
+}
+
+function merchantGuard(scope: ApiKeyScope, walletSessionOnly = false) {
+  return async (request: Request, response: Response, next: NextFunction) => {
+    try {
+      const principal = await authenticate(request);
+      if (!principal) {
+        if (config.DEMO_MODE) return next();
+        throw new AuthError("Merchant authentication is required");
+      }
+      if (walletSessionOnly && principal.kind !== "session")
+        throw new AuthError("A merchant wallet session is required", 403);
+      requireScope(principal, scope);
+      response.locals.auth = principal;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+function authenticatedMerchant(response: Response): AuthPrincipal | null {
+  return (response.locals.auth as AuthPrincipal | undefined) ?? null;
+}
+
+function assertRequestedMerchant(
+  response: Response,
+  requestedWallet: string,
+): void {
+  const principal = authenticatedMerchant(response);
+  if (principal) assertMerchantScope(principal, requestedWallet);
 }
 
 function demoVault(orderId: string): string {
@@ -75,12 +165,9 @@ export function createApp(): Application {
   app.use(
     cors({
       origin: config.NEXT_PUBLIC_APP_URL,
-      methods: ["GET", "POST"],
-      allowedHeaders: [
-        "Content-Type",
-        "Idempotency-Key",
-        "X-Internal-Api-Secret",
-      ],
+      credentials: true,
+      methods: ["GET", "POST", "DELETE"],
+      allowedHeaders: ["Content-Type", "Idempotency-Key", "Authorization"],
     }),
   );
   app.use(express.json({ limit: "64kb" }));
@@ -91,6 +178,148 @@ export function createApp(): Application {
       limit: 120,
       standardHeaders: "draft-7",
       legacyHeaders: false,
+    }),
+  );
+
+  app.post(
+    "/api/auth/challenge",
+    asyncRoute(async (request, response) => {
+      const input = z
+        .object({
+          walletAddress: paymentIntentInputSchema.shape.merchantAddress,
+          chainId: z.literal(AUTH_CHAIN_ID),
+          domain: z.string().min(1).max(255),
+        })
+        .parse(request.body);
+      if (input.domain !== authDomain)
+        throw new AuthError("Authentication domain is not allowed", 403);
+
+      const nonce = createOpaqueToken(18);
+      const challenge = await prisma.authChallenge.create({
+        data: {
+          walletAddress: input.walletAddress.toLowerCase(),
+          chainId: input.chainId,
+          domain: input.domain,
+          nonceHash: hashOpaqueSecret(nonce),
+          expiresAt: new Date(Date.now() + AUTH_CHALLENGE_TTL_MS),
+        },
+      });
+      response.status(201).json({
+        id: challenge.id,
+        nonce,
+        expiresAt: challenge.expiresAt.toISOString(),
+        message: buildMerchantSignInMessage({
+          id: challenge.id,
+          walletAddress: challenge.walletAddress,
+          chainId: challenge.chainId,
+          domain: challenge.domain,
+          nonce,
+          issuedAt: challenge.createdAt,
+          expiresAt: challenge.expiresAt,
+          uri: appUrl.origin,
+        }),
+      });
+    }),
+  );
+
+  app.post(
+    "/api/auth/verify",
+    asyncRoute(async (request, response) => {
+      const input = z
+        .object({
+          challengeId: z.string().uuid(),
+          nonce: z.string().min(16).max(128),
+          signature: z.string().regex(/^0x[a-fA-F0-9]+$/),
+        })
+        .parse(request.body);
+      const challenge = await prisma.authChallenge.findUnique({
+        where: { id: input.challengeId },
+      });
+      if (!challenge) throw new AuthError("Authentication challenge not found");
+      await verifyAuthChallenge({
+        challenge,
+        nonce: input.nonce,
+        signature: input.signature as `0x${string}`,
+        uri: appUrl.origin,
+      });
+
+      const consumed = await prisma.authChallenge.updateMany({
+        where: {
+          id: challenge.id,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { usedAt: new Date() },
+      });
+      if (consumed.count !== 1)
+        throw new AuthError(
+          "Authentication challenge was already consumed",
+          409,
+        );
+
+      const token = createOpaqueToken();
+      const expiresAt = new Date(Date.now() + AUTH_SESSION_TTL_MS);
+      await prisma.merchantSession.create({
+        data: {
+          tokenHash: hashOpaqueSecret(token),
+          walletAddress: challenge.walletAddress,
+          chainId: challenge.chainId,
+          expiresAt,
+        },
+      });
+      response.cookie(AUTH_COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: config.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: AUTH_SESSION_TTL_MS,
+      });
+      response.json({
+        authenticated: true,
+        walletAddress: challenge.walletAddress,
+        chainId: challenge.chainId,
+        expiresAt: expiresAt.toISOString(),
+      });
+    }),
+  );
+
+  app.get(
+    "/api/auth/session",
+    asyncRoute(async (request, response) => {
+      const principal = await authenticate(request);
+      response.setHeader("Cache-Control", "no-store");
+      response.status(principal ? 200 : 401).json(
+        principal
+          ? {
+              authenticated: true,
+              walletAddress: principal.walletAddress,
+              merchantId: principal.merchantId,
+              kind: principal.kind,
+            }
+          : { authenticated: false },
+      );
+    }),
+  );
+
+  app.post(
+    "/api/auth/logout",
+    asyncRoute(async (request, response) => {
+      const token = parseCookieHeader(request.header("cookie")).get(
+        AUTH_COOKIE_NAME,
+      );
+      if (token) {
+        await prisma.merchantSession.updateMany({
+          where: { tokenHash: hashOpaqueSecret(token), revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      response.clearCookie(AUTH_COOKIE_NAME, {
+        httpOnly: true,
+        secure: config.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      response.status(204).end();
     }),
   );
 
@@ -107,8 +336,143 @@ export function createApp(): Application {
   );
 
   app.post(
+    "/api/api-keys",
+    merchantGuard("merchant:read", true),
+    asyncRoute(async (request, response) => {
+      const principal = authenticatedMerchant(response)!;
+      if (!principal.merchantId)
+        throw new AuthError(
+          "Merchant must be indexed before creating an API key",
+          409,
+        );
+      const input = z
+        .object({
+          name: z.string().trim().min(1).max(80),
+          scopes: z.array(z.enum(apiKeyScopes)).min(1),
+          expiresAt: z.string().datetime().optional(),
+        })
+        .parse(request.body);
+      const generated = createApiKey();
+      const apiKey = await prisma.merchantApiKey.create({
+        data: {
+          merchantId: principal.merchantId,
+          name: input.name,
+          keyPrefix: generated.prefix,
+          keyHash: generated.hash,
+          scopes: [...new Set(input.scopes)],
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+        },
+      });
+      response.status(201).json({
+        id: apiKey.id,
+        name: apiKey.name,
+        prefix: apiKey.keyPrefix,
+        scopes: apiKey.scopes,
+        expiresAt: apiKey.expiresAt,
+        key: generated.raw,
+        warning: "This API key is shown only once.",
+      });
+    }),
+  );
+
+  app.get(
+    "/api/api-keys",
+    merchantGuard("merchant:read", true),
+    asyncRoute(async (_request, response) => {
+      const principal = authenticatedMerchant(response)!;
+      if (!principal.merchantId) {
+        response.json([]);
+        return;
+      }
+      const apiKeys = await prisma.merchantApiKey.findMany({
+        where: { merchantId: principal.merchantId },
+        select: {
+          id: true,
+          name: true,
+          keyPrefix: true,
+          scopes: true,
+          expiresAt: true,
+          revokedAt: true,
+          lastUsedAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      response.json(jsonSafe(apiKeys));
+    }),
+  );
+
+  app.delete(
+    "/api/api-keys/:id",
+    merchantGuard("merchant:read", true),
+    asyncRoute(async (request, response) => {
+      const principal = authenticatedMerchant(response)!;
+      const revoked = await prisma.merchantApiKey.updateMany({
+        where: {
+          id: String(request.params.id),
+          merchantId: principal.merchantId ?? "",
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      });
+      if (revoked.count !== 1) {
+        response.status(404).json({ error: "API key not found" });
+        return;
+      }
+      response.status(204).end();
+    }),
+  );
+
+  app.post(
+    "/api/api-keys/:id/rotate",
+    merchantGuard("merchant:read", true),
+    asyncRoute(async (request, response) => {
+      const principal = authenticatedMerchant(response)!;
+      if (!principal.merchantId)
+        throw new AuthError("Merchant is not indexed", 409);
+      const existing = await prisma.merchantApiKey.findFirst({
+        where: {
+          id: String(request.params.id),
+          merchantId: principal.merchantId,
+          revokedAt: null,
+        },
+      });
+      if (!existing) {
+        response.status(404).json({ error: "API key not found" });
+        return;
+      }
+      const generated = createApiKey();
+      const replacement = await prisma.$transaction(async (transaction) => {
+        await transaction.merchantApiKey.update({
+          where: { id: existing.id },
+          data: { revokedAt: new Date() },
+        });
+        return transaction.merchantApiKey.create({
+          data: {
+            merchantId: existing.merchantId,
+            name: existing.name,
+            keyPrefix: generated.prefix,
+            keyHash: generated.hash,
+            scopes: existing.scopes,
+            expiresAt: existing.expiresAt,
+          },
+        });
+      });
+      response.status(201).json({
+        id: replacement.id,
+        name: replacement.name,
+        prefix: replacement.keyPrefix,
+        scopes: replacement.scopes,
+        expiresAt: replacement.expiresAt,
+        key: generated.raw,
+        warning: "This replacement API key is shown only once.",
+      });
+    }),
+  );
+
+  app.post(
     "/api/merchants",
-    mutationGuard,
+    merchantGuard("merchant:read", true),
     asyncRoute(async (request, response) => {
       const input = z
         .object({
@@ -121,6 +485,33 @@ export function createApp(): Application {
             .optional(),
         })
         .parse(request.body);
+      assertRequestedMerchant(response, input.merchantAddress);
+      if (!config.DEMO_MODE) {
+        const indexed = await prisma.merchant.findUnique({
+          where: { walletAddress: input.merchantAddress.toLowerCase() },
+        });
+        if (!indexed) {
+          response.status(409).json({
+            error: "Merchant registration has not been indexed yet",
+          });
+          return;
+        }
+        if (indexed.payoutAddress !== input.payoutAddress.toLowerCase()) {
+          response.status(400).json({
+            error: "Payout address does not match the indexed Arc event",
+          });
+          return;
+        }
+        const updated = await prisma.merchant.update({
+          where: { id: indexed.id },
+          data:
+            input.displayName === undefined
+              ? {}
+              : { displayName: input.displayName },
+        });
+        response.json(jsonSafe(updated));
+        return;
+      }
       const merchant = await prisma.merchant.upsert({
         where: { walletAddress: input.merchantAddress.toLowerCase() },
         update: {
@@ -142,7 +533,9 @@ export function createApp(): Application {
 
   app.get(
     "/api/merchants/:address",
+    merchantGuard("merchant:read"),
     asyncRoute(async (request, response) => {
+      assertRequestedMerchant(response, String(request.params.address));
       const merchant = await prisma.merchant.findUnique({
         where: { walletAddress: String(request.params.address).toLowerCase() },
         include: {
@@ -168,9 +561,17 @@ export function createApp(): Application {
 
   app.post(
     "/api/payment-intents",
-    mutationGuard,
+    merchantGuard("payment-intents:write"),
     asyncRoute(async (request, response) => {
       const input = paymentIntentInputSchema.parse(request.body);
+      assertRequestedMerchant(response, input.merchantAddress);
+      if (!config.DEMO_MODE) {
+        response.status(400).json({
+          error:
+            "Testnet invoices must be imported from a verified Arc transaction at /api/payment-intents/reconcile",
+        });
+        return;
+      }
       const idempotencyKey = request.header("idempotency-key");
       if (
         !idempotencyKey ||
@@ -238,6 +639,127 @@ export function createApp(): Application {
         },
       });
       response.status(201).json(payload);
+    }),
+  );
+
+  app.post(
+    "/api/payment-intents/reconcile",
+    merchantGuard("payment-intents:write"),
+    asyncRoute(async (request, response) => {
+      const input = paymentIntentInputSchema
+        .omit({ vaultAddress: true, createTransactionHash: true })
+        .extend({
+          transactionHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+        })
+        .parse(request.body);
+      assertRequestedMerchant(response, input.merchantAddress);
+      const merchant = await prisma.merchant.findUnique({
+        where: { walletAddress: input.merchantAddress.toLowerCase() },
+      });
+      if (!merchant) {
+        response.status(409).json({
+          error: "Merchant registration has not been indexed yet",
+        });
+        return;
+      }
+
+      const existing = await prisma.paymentIntent.findUnique({
+        where: {
+          createChainId_createTransactionHash: {
+            createChainId: AUTH_CHAIN_ID,
+            createTransactionHash: input.transactionHash.toLowerCase(),
+          },
+        },
+        include: { merchant: true },
+      });
+      if (existing) {
+        if (existing.merchantId !== merchant.id)
+          throw new AuthError("Transaction belongs to another merchant", 403);
+        response.json(
+          jsonSafe({
+            ...existing,
+            amount: formatUsdc(existing.expectedAmount),
+            paymentUrl: `${config.NEXT_PUBLIC_APP_URL}/pay/${existing.slug}`,
+            mode: "testnet",
+          }),
+        );
+        return;
+      }
+
+      const verified = await verifyPaymentIntentTransaction(
+        {
+          transactionHash: input.transactionHash as `0x${string}`,
+          merchantAddress: input.merchantAddress as `0x${string}`,
+          orderId: input.orderId,
+          amount: input.amount,
+          expiresAt: input.expiresAt,
+          refundAddress: input.refundAddress as `0x${string}`,
+          ...(input.description === undefined
+            ? {}
+            : { description: input.description }),
+        },
+        merchant.payoutAddress as `0x${string}`,
+      );
+      const slugBase =
+        input.orderId
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 40) || "invoice";
+      const slug = `${slugBase}-${input.transactionHash.slice(2, 10).toLowerCase()}`;
+      const created = await prisma.$transaction(async (transaction) => {
+        const intent = await transaction.paymentIntent.create({
+          data: {
+            slug,
+            orderId: input.orderId,
+            orderIdBytes32: verified.orderIdBytes32,
+            expectedAmount: verified.expectedAmount,
+            refundAddress: verified.refundAddress,
+            payoutAddress: verified.payoutAddress,
+            vaultAddress: verified.vaultAddress,
+            description: input.description ?? null,
+            metadataHash: verified.metadataHash,
+            expiresAt: verified.expiresAt,
+            createChainId: verified.chainId,
+            createTransactionHash: verified.transactionHash.toLowerCase(),
+            merchantId: merchant.id,
+          },
+          include: { merchant: true },
+        });
+        await transaction.chainTransaction.create({
+          data: {
+            chainId: verified.chainId,
+            transactionHash: verified.transactionHash.toLowerCase(),
+            logIndex: verified.logIndex,
+            blockNumber: verified.blockNumber,
+            blockHash: verified.blockHash.toLowerCase(),
+            contractAddress: verified.factoryAddress.toLowerCase(),
+            type: "PaymentIntentCreated",
+            payload: {
+              orderId: verified.orderIdBytes32,
+              merchant: verified.merchantAddress,
+              vault: verified.vaultAddress,
+              payoutAddress: verified.payoutAddress,
+              refundAddress: verified.refundAddress,
+              expectedAmount: verified.expectedAmount.toString(),
+              protocolFeeBps: verified.protocolFeeBps,
+              expiresAt: verified.expiresAt.toISOString(),
+              metadataHash: verified.metadataHash,
+            },
+            merchantId: merchant.id,
+            paymentIntentId: intent.id,
+          },
+        });
+        return intent;
+      });
+      response.status(201).json(
+        jsonSafe({
+          ...created,
+          amount: formatUsdc(created.expectedAmount),
+          paymentUrl: `${config.NEXT_PUBLIC_APP_URL}/pay/${created.slug}`,
+          mode: "testnet",
+        }),
+      );
     }),
   );
 
@@ -373,7 +895,7 @@ export function createApp(): Application {
 
   app.post(
     "/api/payment-intents/:id/attempts",
-    mutationGuard,
+    merchantGuard("payment-intents:write"),
     asyncRoute(async (request, response) => {
       const input = paymentAttemptInputSchema.parse(request.body);
       const intent = await prisma.paymentIntent.findFirst({
@@ -420,9 +942,10 @@ export function createApp(): Application {
 
   app.post(
     "/api/webhooks",
-    mutationGuard,
+    merchantGuard("webhooks:write"),
     asyncRoute(async (request, response) => {
       const input = webhookInputSchema.parse(request.body);
+      assertRequestedMerchant(response, input.merchantAddress);
       await assertSafeWebhookUrl(input.url);
       const merchant = await prisma.merchant.findUnique({
         where: { walletAddress: input.merchantAddress.toLowerCase() },
@@ -451,11 +974,12 @@ export function createApp(): Application {
 
   app.get(
     "/api/webhooks",
-    mutationGuard,
+    merchantGuard("webhooks:read"),
     asyncRoute(async (request, response) => {
       const merchantAddress = paymentIntentInputSchema.shape.merchantAddress
         .parse(request.query.merchantAddress)
         .toLowerCase();
+      assertRequestedMerchant(response, merchantAddress);
       const endpoints = await prisma.webhookEndpoint.findMany({
         where: { merchant: { walletAddress: merchantAddress } },
         select: {
@@ -473,8 +997,9 @@ export function createApp(): Application {
 
   app.post(
     "/api/webhooks/:id/test",
-    mutationGuard,
+    merchantGuard("webhooks:write"),
     asyncRoute(async (request, response) => {
+      const principal = authenticatedMerchant(response);
       const endpoint = await prisma.webhookEndpoint.findUnique({
         where: { id: String(request.params.id) },
         include: { merchant: true },
@@ -483,6 +1008,8 @@ export function createApp(): Application {
         response.status(404).json({ error: "Webhook not found" });
         return;
       }
+      if (principal?.merchantId !== endpoint.merchantId)
+        throw new AuthError("Webhook belongs to another merchant", 403);
       await assertSafeWebhookUrl(endpoint.url);
       const timestamp = Math.floor(Date.now() / 1000).toString();
       const body = JSON.stringify({
@@ -537,8 +1064,15 @@ export function createApp(): Application {
       const clientError =
         error instanceof SyntaxError ||
         (typeof error === "object" && error !== null && "issues" in error);
-      response.status(clientError ? 400 : 500).json({
-        error: clientError ? message : "The request could not be completed",
+      const statusCode =
+        error instanceof AuthError
+          ? error.statusCode
+          : error instanceof ReconciliationError || clientError
+            ? 400
+            : 500;
+      response.status(statusCode).json({
+        error:
+          statusCode < 500 ? message : "The request could not be completed",
       });
     },
   );

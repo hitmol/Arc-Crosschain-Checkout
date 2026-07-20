@@ -2,7 +2,7 @@
 
 1. Independent contract audit, invariant expansion, formal state-transition review, and remediation.
 2. Arc mainnet availability and independently verified chain/CCTP configuration.
-3. Merchant wallet-signature authentication, scoped API keys, rotation, and recovery.
+3. Complete merchant account recovery and administrative audit UI around the implemented wallet-signature sessions and scoped API-key rotation.
 4. Redundant RPC/Circle providers, queue isolation, tracing, SLOs, alerts, and incident response.
 5. Compliance, sanctions screening, privacy, data retention, and jurisdiction review.
 6. Automatic crosschain refund orchestration with explicit customer consent.

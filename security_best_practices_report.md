@@ -7,17 +7,14 @@ Scope: Solidity contracts, API, worker, web application, database schema, depend
 
 No critical or high-severity findings were identified in this implementation review. The contracts compiled and passed 12 unit/fuzz tests plus two stateful invariants. Static secret/dangerous-pattern scanning passed. The production dependency audit reports no critical, high, or moderate advisories; one low-severity transitive advisory remains because the patched `elliptic` version named by the advisory is not published to npm.
 
-This is still unaudited testnet software. A production launch remains blocked on independent contract review and merchant-scoped authentication.
+This is still unaudited testnet software. Merchant-scoped authentication is implemented, but a production launch remains blocked on independent contract review and customer-owned refund authorization.
 
 ## Open findings
 
-### SEC-01 — Shared backend secret is not merchant-scoped (Medium)
+### SEC-01 — Shared backend secret is not merchant-scoped (Resolved)
 
-- Location: `apps/api/src/app.ts:51`
-- Impact: Outside demo mode, mutations are protected by one internal API secret. A party with that secret could act across merchant records rather than proving control of a particular merchant wallet.
-- Current controls: constant-time comparison, CORS allowlisting, rate limiting, input validation, and explicit production secret requirements.
-- Recommendation: require a short-lived wallet-signed SIWE-style challenge or merchant API keys stored as hashes and scoped to merchant ID/permissions. Rotate and revoke credentials independently.
-- Release status: acceptable for a controlled testnet demo; production blocker.
+- Resolution: The shared browser secret was removed. Merchant browser mutations now require a short-lived nonce-bound wallet signature and HTTP-only session. Server keys are hashed, permission-scoped, merchant-bound, revocable, rotatable, and displayed only once.
+- Verification: invalid signer, expiry, replay, cross-merchant isolation, and key hashing tests are included in `apps/api/src/auth.test.ts`.
 
 ### SEC-02 — Unpatched low-severity transitive `elliptic` advisory (Low)
 
@@ -58,7 +55,7 @@ This is still unaudited testnet software. A production launch remains blocked on
 ## Production gates
 
 1. Independent smart-contract audit and remediation.
-2. Merchant-scoped authentication and authorization.
+2. Customer-signed payment attempts that prevent merchant-controlled refund redirection.
 3. Hardware/KMS-backed relayer key with low balance and monitoring, or remove the optional relayer.
 4. Multisig ownership, tested two-step transfers, incident runbook, and RPC redundancy.
 5. Live testnet deployment evidence, explorer verification, end-to-end CCTP transaction, and refund recovery drill.

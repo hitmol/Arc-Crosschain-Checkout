@@ -74,7 +74,7 @@ export class ArcCheckout {
           Accept: "application/json",
           "Content-Type": "application/json",
           ...(this.options.apiKey
-            ? { "x-internal-api-secret": this.options.apiKey }
+            ? { Authorization: `Bearer ${this.options.apiKey}` }
             : {}),
           ...init.headers,
         },

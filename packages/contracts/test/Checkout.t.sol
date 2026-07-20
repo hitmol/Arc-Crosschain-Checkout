@@ -74,6 +74,24 @@ contract CheckoutTest is Test {
         factory.createPaymentIntent(orderId, 1, uint64(block.timestamp + 1 hours), refundAddress, bytes32(0));
     }
 
+    function testOrderIdsAreScopedPerMerchant() public {
+        bytes32 orderId = keccak256("SHARED-ORDER");
+        address secondMerchant = makeAddr("secondMerchant");
+        address secondPayout = makeAddr("secondPayout");
+        vm.prank(secondMerchant);
+        registry.registerMerchant(secondPayout, keccak256("second-merchant"));
+
+        PaymentVault firstVault = _create(orderId, 100_000_000);
+        vm.prank(secondMerchant);
+        address secondVault = factory.createPaymentIntent(
+            orderId, 100_000_000, uint64(block.timestamp + 1 hours), refundAddress, keccak256("invoice")
+        );
+
+        assertNotEq(address(firstVault), secondVault);
+        assertEq(factory.vaultByOrderId(merchant, orderId), address(firstVault));
+        assertEq(factory.vaultByOrderId(secondMerchant, orderId), secondVault);
+    }
+
     function testImplementationCannotBeInitialized() public {
         vm.expectRevert(PaymentVault.AlreadyInitialized.selector);
         implementation.initialize(

@@ -1,22 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { keccak256, toBytes, zeroHash } from "viem";
 import {
   useAccount,
   useChainId,
   useSwitchChain,
+  useSignMessage,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
 import { arcTestnet } from "viem/chains";
 import { merchantRegistryAbi } from "@/lib/contracts";
 import { WalletButton } from "@/components/wallet-button";
+import { apiFetch } from "@/lib/api";
+import { ensureMerchantSession } from "@/lib/merchant-auth";
 
 const registryAddress = process.env.NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS as
   `0x${string}` | undefined;
 
 export default function OnboardingPage() {
+  const router = useRouter();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
@@ -27,8 +32,58 @@ export default function OnboardingPage() {
     isPending,
   } = useWriteContract();
   const receipt = useWaitForTransactionReceipt({ hash, confirmations: 1 });
+  const { signMessageAsync } = useSignMessage();
   const [payout, setPayout] = useState("");
   const [name, setName] = useState("");
+  const [syncStatus, setSyncStatus] = useState("");
+  const syncStarted = useRef(false);
+
+  useEffect(() => {
+    if (!receipt.isSuccess || !address || syncStarted.current) return;
+    syncStarted.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        setSyncStatus("Authenticating merchant wallet…");
+        await ensureMerchantSession(address, (message) =>
+          signMessageAsync({ message }),
+        );
+        setSyncStatus("Waiting for the Arc indexer…");
+        const deadline = Date.now() + 60_000;
+        while (!cancelled && Date.now() < deadline) {
+          try {
+            await apiFetch(`/api/merchants/${address}`);
+            await apiFetch("/api/merchants", {
+              method: "POST",
+              body: JSON.stringify({
+                merchantAddress: address,
+                payoutAddress: payout,
+                displayName: name || undefined,
+              }),
+            });
+            if (!cancelled) router.replace("/dashboard");
+            return;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+          }
+        }
+        if (!cancelled)
+          setSyncStatus(
+            "Registration is confirmed, but indexing is taking longer than expected. You can safely refresh this page.",
+          );
+      } catch (caught) {
+        if (!cancelled)
+          setSyncStatus(
+            caught instanceof Error
+              ? caught.message
+              : "Merchant synchronization failed",
+          );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, name, payout, receipt.isSuccess, router, signMessageAsync]);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!address || !registryAddress) return;
@@ -111,7 +166,7 @@ export default function OnboardingPage() {
         {error && <div className="message error">{error.message}</div>}
         {receipt.isSuccess && (
           <div className="message success">
-            Merchant registered on Arc. Transaction {hash}
+            Merchant registered on Arc. Transaction {hash}. {syncStatus}
           </div>
         )}
       </div>
