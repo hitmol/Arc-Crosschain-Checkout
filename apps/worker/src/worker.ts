@@ -1,8 +1,9 @@
 import { createDecipheriv, createHash, createHmac } from "node:crypto";
 import { createServer } from "node:http";
 import {
+  enqueuePaymentWebhook,
+  lifecycleWebhookEventId,
   prisma,
-  type PaymentIntent,
   type WebhookEndpoint,
 } from "@arc-checkout/database";
 import { fetchCctpMessages, selectCctpMessage } from "@arc-checkout/cctp";
@@ -11,7 +12,6 @@ import {
   chainsByKey,
   viemChains,
 } from "@arc-checkout/chain-config";
-import { formatUsdc } from "@arc-checkout/shared";
 import pino from "pino";
 import {
   createPublicClient,
@@ -40,6 +40,7 @@ import {
   markSettlementSubmitted,
   storePreparedSettlement,
 } from "./settlement-lock.js";
+import { processWebhookQueue } from "./webhook-delivery.js";
 
 const env = z
   .object({
@@ -141,40 +142,6 @@ function decryptSecret(value: string): string {
   ]).toString("utf8");
 }
 
-async function queueWebhook(intent: PaymentIntent, eventType: string) {
-  const endpoints = await prisma.webhookEndpoint.findMany({
-    where: {
-      merchantId: intent.merchantId,
-      active: true,
-      events: { has: eventType },
-    },
-  });
-  for (const endpoint of endpoints) {
-    const eventId = crypto.randomUUID();
-    await prisma.webhookDelivery.upsert({
-      where: { eventId },
-      update: {},
-      create: {
-        eventId,
-        eventType,
-        webhookEndpointId: endpoint.id,
-        payload: {
-          id: eventId,
-          type: eventType,
-          timestamp: new Date().toISOString(),
-          merchantId: intent.merchantId,
-          invoiceId: intent.id,
-          orderId: intent.orderId,
-          amount: formatUsdc(intent.expectedAmount),
-          finalStatus: intent.status,
-          arcMintTransactionHash: intent.arcMintTransactionHash,
-          settlementTransactionHash: intent.settlementTransactionHash,
-        },
-      },
-    });
-  }
-}
-
 async function reconcileCctpAttempts() {
   const attempts = await prisma.paymentAttempt.findMany({
     where: {
@@ -229,11 +196,25 @@ async function reconcileCctpAttempts() {
         attempt.status === "BURN_SUBMITTED" ||
         attempt.status === "RECOVERABLE"
       ) {
-        await prisma.paymentAttempt.update({
-          where: { id: attempt.id },
-          data: { status: "SOURCE_CONFIRMED" },
+        await prisma.$transaction(async (transaction) => {
+          await transaction.paymentAttempt.update({
+            where: { id: attempt.id },
+            data: { status: "SOURCE_CONFIRMED" },
+          });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: lifecycleWebhookEventId({
+              eventType: "payment.source_confirmed",
+              identity: `${attempt.sourceChainId}:${sourceHash}`,
+            }),
+            eventType: "payment.source_confirmed",
+            intent: attempt.paymentIntent,
+            data: {
+              attemptId: attempt.id,
+              sourceChainId: attempt.sourceChainId,
+              sourceTransactionHash: sourceHash,
+            },
+          });
         });
-        await queueWebhook(attempt.paymentIntent, "payment.source_confirmed");
       }
 
       const response = await fetchCctpMessages(
@@ -276,8 +257,9 @@ async function reconcileCctpAttempts() {
         ) &&
         message.forwardTxHash
       ) {
+        const forwardTxHash = message.forwardTxHash;
         const arcReceipt = await publicClient.getTransactionReceipt({
-          hash: message.forwardTxHash,
+          hash: forwardTxHash,
         });
         const mintedAmount = validatedArcMintAmount({
           receipt: arcReceipt,
@@ -285,8 +267,8 @@ async function reconcileCctpAttempts() {
           vault: attempt.vaultAddress as Address,
           expectedAmount: message.destinationAmount,
         });
-        await prisma.$transaction([
-          prisma.paymentAttempt.update({
+        await prisma.$transaction(async (transaction) => {
+          await transaction.paymentAttempt.update({
             where: { id: attempt.id },
             data: {
               ...messageData,
@@ -296,20 +278,65 @@ async function reconcileCctpAttempts() {
               errorCode: null,
               errorMessage: null,
             },
-          }),
-          prisma.paymentIntent.update({
+          });
+          const updatedIntent = await transaction.paymentIntent.update({
             where: { id: attempt.paymentIntentId },
-            data: { arcMintTransactionHash: message.forwardTxHash },
-          }),
-        ]);
-        await queueWebhook(attempt.paymentIntent, "payment.arc_minted");
+            data: { arcMintTransactionHash: forwardTxHash },
+          });
+          if (message.attestation) {
+            await enqueuePaymentWebhook(transaction, {
+              eventId: lifecycleWebhookEventId({
+                eventType: "payment.attestation_received",
+                identity: message.messageHash,
+              }),
+              eventType: "payment.attestation_received",
+              intent: updatedIntent,
+              data: {
+                attemptId: attempt.id,
+                messageHash: message.messageHash,
+                eventNonce: message.eventNonce ?? message.nonce,
+              },
+            });
+          }
+          await enqueuePaymentWebhook(transaction, {
+            eventId: lifecycleWebhookEventId({
+              eventType: "payment.arc_minted",
+              identity: forwardTxHash,
+            }),
+            eventType: "payment.arc_minted",
+            intent: updatedIntent,
+            data: {
+              attemptId: attempt.id,
+              messageHash: message.messageHash,
+              arcMintTransactionHash: forwardTxHash,
+              mintedAmount: mintedAmount.toString(),
+            },
+          });
+        });
       } else {
-        await prisma.paymentAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            ...messageData,
-            status: "ATTESTING",
-          },
+        await prisma.$transaction(async (transaction) => {
+          await transaction.paymentAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              ...messageData,
+              status: "ATTESTING",
+            },
+          });
+          if (message.attestation) {
+            await enqueuePaymentWebhook(transaction, {
+              eventId: lifecycleWebhookEventId({
+                eventType: "payment.attestation_received",
+                identity: message.messageHash,
+              }),
+              eventType: "payment.attestation_received",
+              intent: attempt.paymentIntent,
+              data: {
+                attemptId: attempt.id,
+                messageHash: message.messageHash,
+                eventNonce: message.eventNonce ?? message.nonce,
+              },
+            });
+          }
         });
       }
     } catch (error) {
@@ -539,51 +566,6 @@ async function deliverWebhook(
   });
 }
 
-async function processWebhookQueue() {
-  const deliveries = await prisma.webhookDelivery.findMany({
-    where: {
-      status: { in: ["PENDING", "RETRYING"] },
-      nextAttemptAt: { lte: new Date() },
-    },
-    include: { webhookEndpoint: true },
-    take: 25,
-  });
-  for (const delivery of deliveries) {
-    try {
-      const response = await deliverWebhook(
-        delivery.webhookEndpoint,
-        delivery.payload as object,
-        delivery.eventId,
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await prisma.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: "DELIVERED",
-          deliveredAt: new Date(),
-          attempts: { increment: 1 },
-          lastStatusCode: response.status,
-        },
-      });
-    } catch (error) {
-      const attempts = delivery.attempts + 1;
-      const permanent = attempts >= 8;
-      await prisma.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: permanent ? "FAILED" : "RETRYING",
-          attempts,
-          lastError:
-            error instanceof Error ? error.message.slice(0, 500) : "unknown",
-          nextAttemptAt: new Date(
-            Date.now() + Math.min(300_000, 2 ** attempts * 1000),
-          ),
-        },
-      });
-    }
-  }
-}
-
 async function reconcileLocalDemo() {
   const attempts = await prisma.paymentAttempt.findMany({
     where: {
@@ -615,36 +597,91 @@ async function reconcileLocalDemo() {
     } as const;
     const next = transitions[attempt.status as keyof typeof transitions];
     if (!next) continue;
-    await prisma.paymentAttempt.update({
-      where: { id: attempt.id },
-      data: {
-        status: next,
-        cctpMessageId:
-          next === "ARC_MINTED"
-            ? `local-mock-${attempt.id}`
-            : attempt.cctpMessageId,
-      },
-    });
-    if (next === "ARC_MINTED")
-      await prisma.paymentIntent.update({
-        where: { id: attempt.paymentIntentId },
+    await prisma.$transaction(async (transaction) => {
+      await transaction.paymentAttempt.update({
+        where: { id: attempt.id },
         data: {
-          status: "FUNDED",
-          fundedAmount: attempt.paymentIntent.expectedAmount,
+          status: next,
+          cctpMessageId:
+            next === "ARC_MINTED"
+              ? `local-mock-${attempt.id}`
+              : attempt.cctpMessageId,
         },
       });
-    if (next === "SETTLING")
-      await prisma.paymentIntent.update({
-        where: { id: attempt.paymentIntentId },
-        data: { status: "SETTLING" },
-      });
-    if (next === "SETTLED") {
-      const updated = await prisma.paymentIntent.update({
-        where: { id: attempt.paymentIntentId },
-        data: { status: "SETTLED", settledAt: new Date() },
-      });
-      await queueWebhook(updated, "payment.settled");
-    }
+      let updatedIntent = attempt.paymentIntent;
+      if (next === "BURN_SUBMITTED") {
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.source_submitted",
+            identity: `demo:${attempt.id}`,
+          }),
+          eventType: "payment.source_submitted",
+          intent: updatedIntent,
+          data: { attemptId: attempt.id, demo: true },
+        });
+      }
+      if (next === "SOURCE_CONFIRMED") {
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.source_confirmed",
+            identity: `demo:${attempt.id}`,
+          }),
+          eventType: "payment.source_confirmed",
+          intent: updatedIntent,
+          data: { attemptId: attempt.id, demo: true },
+        });
+      }
+      if (next === "ATTESTING") {
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.attestation_received",
+            identity: `demo:${attempt.id}`,
+          }),
+          eventType: "payment.attestation_received",
+          intent: updatedIntent,
+          data: { attemptId: attempt.id, demo: true },
+        });
+      }
+      if (next === "ARC_MINTED") {
+        updatedIntent = await transaction.paymentIntent.update({
+          where: { id: attempt.paymentIntentId },
+          data: {
+            status: "FUNDED",
+            fundedAmount: attempt.paymentIntent.expectedAmount,
+          },
+        });
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.arc_minted",
+            identity: `demo:${attempt.id}`,
+          }),
+          eventType: "payment.arc_minted",
+          intent: updatedIntent,
+          data: { attemptId: attempt.id, demo: true },
+        });
+      }
+      if (next === "SETTLING") {
+        updatedIntent = await transaction.paymentIntent.update({
+          where: { id: attempt.paymentIntentId },
+          data: { status: "SETTLING" },
+        });
+      }
+      if (next === "SETTLED") {
+        updatedIntent = await transaction.paymentIntent.update({
+          where: { id: attempt.paymentIntentId },
+          data: { status: "SETTLED", settledAt: new Date() },
+        });
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.settled",
+            identity: `demo:${attempt.id}`,
+          }),
+          eventType: "payment.settled",
+          intent: updatedIntent,
+          data: { attemptId: attempt.id, demo: true },
+        });
+      }
+    });
   }
 }
 
@@ -677,7 +714,7 @@ async function tick() {
     await reconcileCctpAttempts();
     await reconcileVaults();
   }
-  await processWebhookQueue();
+  await processWebhookQueue(deliverWebhook);
 }
 
 const workerState: {

@@ -258,6 +258,11 @@ describe.skipIf(!databaseAvailable)("Arc indexer with PostgreSQL", () => {
       lag: 0n,
     });
     expect(await prisma.chainTransaction.count({ where: { chainId } })).toBe(8);
+    expect(
+      await prisma.webhookEvent.count({
+        where: { merchant: { walletAddress: merchant.toLowerCase() } },
+      }),
+    ).toBe(7);
     const intent = await prisma.paymentIntent.findUniqueOrThrow({
       where: { vaultAddress: vault.toLowerCase() },
     });
@@ -294,6 +299,11 @@ describe.skipIf(!databaseAvailable)("Arc indexer with PostgreSQL", () => {
     });
     await indexArcEvents(options(mockClient(true)));
     expect(await prisma.chainTransaction.count({ where: { chainId } })).toBe(8);
+    expect(
+      await prisma.webhookEvent.count({
+        where: { merchant: { walletAddress: merchant.toLowerCase() } },
+      }),
+    ).toBe(7);
     const cursor = await prisma.indexerCursor.findUniqueOrThrow({
       where: { chainId_stream: { chainId, stream: "arc-events" } },
     });

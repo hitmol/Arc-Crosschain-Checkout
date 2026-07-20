@@ -35,6 +35,7 @@ enum AttemptStatus {
 
 enum WebhookDeliveryStatus {
   PENDING
+  PROCESSING
   DELIVERED
   RETRYING
   FAILED
@@ -60,25 +61,26 @@ model Merchant {
   updatedAt     DateTime           @updatedAt
   intents       PaymentIntent[]
   webhooks      WebhookEndpoint[]
+  webhookEvents WebhookEvent[]
   apiKeys       MerchantApiKey[]
   transactions  ChainTransaction[]
 }
 
 model PaymentIntent {
-  id                        String             @id @default(uuid())
-  slug                      String             @unique
+  id                        String                 @id @default(uuid())
+  slug                      String                 @unique
   orderId                   String
   orderIdBytes32            String
   expectedAmount            BigInt
-  fundedAmount              BigInt             @default(0)
+  fundedAmount              BigInt                 @default(0)
   refundAddress             String?
   payoutAddress             String
-  vaultAddress              String?            @unique
+  vaultAddress              String?                @unique
   metadataHash              String?
   description               String?
-  status                    PaymentStatus      @default(OPEN)
+  status                    PaymentStatus          @default(OPEN)
   expiresAt                 DateTime
-  createChainId             Int                @default(5042002)
+  createChainId             Int                    @default(5042002)
   createTransactionHash     String?
   arcMintTransactionHash    String?
   settlementTransactionHash String?
@@ -89,14 +91,15 @@ model PaymentIntent {
   excessAmount              BigInt?
   refundedAmount            BigInt?
   settledAt                 DateTime?
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
   merchantId                String
-  merchant                  Merchant           @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  merchant                  Merchant               @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   attempts                  PaymentAttempt[]
   quotes                    PaymentQuote[]
   settlementSubmissions     SettlementSubmission[]
   transactions              ChainTransaction[]
+  webhookEvents             WebhookEvent[]
 
   @@unique([merchantId, orderId])
   @@unique([merchantId, orderIdBytes32])
@@ -106,63 +109,63 @@ model PaymentIntent {
 }
 
 model PaymentAttempt {
-  id                    String        @id @default(uuid())
-  attemptIdentifier     String?       @unique
-  active                Boolean       @default(true)
-  vaultAddress          String?
-  orderIdBytes32        String?
-  sourceChainId         Int
-  destinationChainId    Int           @default(5042002)
-  customerAddress       String
-  refundAddress         String?
-  destinationAmount     BigInt?
-  quotedSourceAmount    BigInt
-  maximumSourceAmount   BigInt?
-  maxFee                BigInt?
-  quoteExpiresAt        DateTime?
-  nonce                 BigInt?
-  attemptExpiresAt      DateTime?
-  authorizationDigest   String?
-  signature             String?
+  id                        String        @id @default(uuid())
+  attemptIdentifier         String?       @unique
+  active                    Boolean       @default(true)
+  vaultAddress              String?
+  orderIdBytes32            String?
+  sourceChainId             Int
+  destinationChainId        Int           @default(5042002)
+  customerAddress           String
+  refundAddress             String?
+  destinationAmount         BigInt?
+  quotedSourceAmount        BigInt
+  maximumSourceAmount       BigInt?
+  maxFee                    BigInt?
+  quoteExpiresAt            DateTime?
+  nonce                     BigInt?
+  attemptExpiresAt          DateTime?
+  authorizationDigest       String?
+  signature                 String?
   registeredTransactionHash String?
-  clientSecretHash       String?
-  bridgeResult           Json?
-  bridgeRecoverable      Boolean       @default(false)
-  status                AttemptStatus @default(QUOTED)
-  sourceTransactionHash String?       @unique
-  cctpMessageId         String?       @unique
-  sourceDomain          Int?
-  destinationDomain     Int?
-  messageHash           String?       @unique
-  eventNonce            String?
-  burnToken             String?
-  mintRecipient         String?
-  burnAmount            BigInt?
-  mintedAmount          BigInt?
-  finalityThreshold     Int?
-  sourceSender          String?
-  forwardState          String?
-  forwardTxHash         String?       @unique
-  cctpMessage           String?
-  cctpAttestation       String?
-  errorCode             String?
-  errorMessage          String?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
-  paymentIntentId       String
-  paymentIntent         PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
-  quoteId               String?       @unique
-  quote                 PaymentQuote? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  clientSecretHash          String?
+  bridgeResult              Json?
+  bridgeRecoverable         Boolean       @default(false)
+  status                    AttemptStatus @default(QUOTED)
+  sourceTransactionHash     String?       @unique
+  cctpMessageId             String?       @unique
+  sourceDomain              Int?
+  destinationDomain         Int?
+  messageHash               String?       @unique
+  eventNonce                String?
+  burnToken                 String?
+  mintRecipient             String?
+  burnAmount                BigInt?
+  mintedAmount              BigInt?
+  finalityThreshold         Int?
+  sourceSender              String?
+  forwardState              String?
+  forwardTxHash             String?       @unique
+  cctpMessage               String?
+  cctpAttestation           String?
+  errorCode                 String?
+  errorMessage              String?
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
+  paymentIntentId           String
+  paymentIntent             PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  quoteId                   String?       @unique
+  quote                     PaymentQuote? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
 
+  @@unique([sourceDomain, eventNonce])
   @@index([status, updatedAt])
   @@index([paymentIntentId, active])
-  @@unique([sourceDomain, eventNonce])
 }
 
 model PaymentQuote {
-  id                         String         @id @default(uuid())
+  id                         String          @id @default(uuid())
   sourceChainId              Int
-  destinationChainId         Int            @default(5042002)
+  destinationChainId         Int             @default(5042002)
   requestedDestinationAmount BigInt
   protocolFee                BigInt
   forwardFee                 BigInt
@@ -173,9 +176,9 @@ model PaymentQuote {
   transferSpeed              String
   expiresAt                  DateTime
   usedAt                     DateTime?
-  createdAt                  DateTime       @default(now())
+  createdAt                  DateTime        @default(now())
   paymentIntentId            String
-  paymentIntent              PaymentIntent  @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  paymentIntent              PaymentIntent   @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
   attempt                    PaymentAttempt?
 
   @@index([paymentIntentId, expiresAt])
@@ -201,18 +204,18 @@ model ChainTransaction {
 }
 
 model SettlementSubmission {
-  id               String                     @id @default(uuid())
-  lockToken        String                     @unique
-  transactionHash  String?                    @unique
-  rawTransaction   String?
-  status           SettlementSubmissionStatus @default(CLAIMED)
-  errorMessage     String?
-  submittedAt      DateTime?
-  confirmedAt      DateTime?
-  createdAt        DateTime                   @default(now())
-  updatedAt        DateTime                   @updatedAt
-  paymentIntentId  String
-  paymentIntent    PaymentIntent              @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  id              String                     @id @default(uuid())
+  lockToken       String                     @unique
+  transactionHash String?                    @unique
+  rawTransaction  String?
+  status          SettlementSubmissionStatus @default(CLAIMED)
+  errorMessage    String?
+  submittedAt     DateTime?
+  confirmedAt     DateTime?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+  paymentIntentId String
+  paymentIntent   PaymentIntent              @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
 
   @@index([paymentIntentId, createdAt])
   @@index([status, updatedAt])
@@ -275,22 +278,59 @@ model WebhookEndpoint {
   @@unique([merchantId, url])
 }
 
+model WebhookEvent {
+  id              String            @id
+  eventType       String
+  sequence        BigInt            @unique @default(autoincrement())
+  payload         Json
+  createdAt       DateTime          @default(now())
+  merchantId      String
+  merchant        Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  paymentIntentId String
+  paymentIntent   PaymentIntent     @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  deliveries      WebhookDelivery[]
+
+  @@index([paymentIntentId, sequence])
+  @@index([merchantId, createdAt])
+}
+
 model WebhookDelivery {
-  id                String                @id @default(uuid())
-  eventId           String                @unique
-  eventType         String
-  payload           Json
-  status            WebhookDeliveryStatus @default(PENDING)
-  attempts          Int                   @default(0)
+  id                String                   @id @default(uuid())
+  status            WebhookDeliveryStatus    @default(PENDING)
+  attempts          Int                      @default(0)
+  retryCount        Int                      @default(0)
+  replayCount       Int                      @default(0)
+  lockToken         String?                  @unique
+  lockedAt          DateTime?
   lastStatusCode    Int?
   lastError         String?
-  nextAttemptAt     DateTime              @default(now())
+  nextAttemptAt     DateTime                 @default(now())
   deliveredAt       DateTime?
-  createdAt         DateTime              @default(now())
+  createdAt         DateTime                 @default(now())
+  eventId           String
+  event             WebhookEvent             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   webhookEndpointId String
-  webhookEndpoint   WebhookEndpoint       @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+  webhookEndpoint   WebhookEndpoint          @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+  history           WebhookDeliveryAttempt[]
 
+  @@unique([eventId, webhookEndpointId])
   @@index([status, nextAttemptAt])
+  @@index([status, lockedAt])
+  @@index([webhookEndpointId, createdAt])
+}
+
+model WebhookDeliveryAttempt {
+  id                String          @id @default(uuid())
+  attemptNumber     Int
+  responseStatus    Int?
+  errorMessage      String?
+  requestedAt       DateTime        @default(now())
+  completedAt       DateTime?
+  webhookDeliveryId String
+  webhookDelivery   WebhookDelivery @relation(fields: [webhookDeliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([webhookDeliveryId, attemptNumber])
+  @@index([webhookDeliveryId, requestedAt])
 }
 
 model IndexerCursor {

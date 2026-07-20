@@ -1,4 +1,10 @@
-import { prisma, type Prisma } from "@arc-checkout/database";
+import {
+  chainWebhookEventId,
+  enqueuePaymentWebhook,
+  lifecycleWebhookEventId,
+  prisma,
+  type Prisma,
+} from "@arc-checkout/database";
 import {
   decodeEventLog,
   hexToString,
@@ -244,6 +250,22 @@ export async function processArcLog(
         });
         merchantId = merchant.id;
         paymentIntentId = intent.id;
+        await enqueuePaymentWebhook(transaction, {
+          eventId: chainWebhookEventId({
+            eventType: "payment.intent.created",
+            chainId: options.chainId,
+            transactionHash: log.transactionHash,
+            logIndex: log.logIndex,
+          }),
+          eventType: "payment.intent.created",
+          intent,
+          data: {
+            chainId: options.chainId,
+            transactionHash: log.transactionHash.toLowerCase(),
+            logIndex: log.logIndex,
+            vaultAddress: intent.vaultAddress,
+          },
+        });
       } else {
         const intent = await transaction.paymentIntent.findUnique({
           where: { vaultAddress: contractAddress },
@@ -265,7 +287,7 @@ export async function processArcLog(
           const attemptExpiresAt = new Date(
             Number(bigintArg(args, "attemptExpiresAt")) * 1000,
           );
-          await transaction.paymentAttempt.upsert({
+          const registeredAttempt = await transaction.paymentAttempt.upsert({
             where: { attemptIdentifier },
             update: {
               active: true,
@@ -308,17 +330,50 @@ export async function processArcLog(
             where: { id: intent.id },
             data: { refundAddress },
           });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: lifecycleWebhookEventId({
+              eventType: "payment.attempt.created",
+              identity: attemptIdentifier,
+            }),
+            eventType: "payment.attempt.created",
+            intent,
+            data: {
+              attemptId: registeredAttempt.id,
+              attemptIdentifier,
+              sourceChainId,
+              customerAddress: payer,
+              refundAddress,
+              registrationTransactionHash: log.transactionHash.toLowerCase(),
+            },
+          });
         } else if (eventName === "PaymentAttemptCleared") {
+          const attemptIdentifier = hexArg(args, "attemptId");
           await transaction.paymentAttempt.updateMany({
             where: {
-              attemptIdentifier: hexArg(args, "attemptId"),
+              attemptIdentifier,
               paymentIntentId: intent.id,
             },
             data: { active: false, status: "EXPIRED" },
           });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: chainWebhookEventId({
+              eventType: "payment.expired",
+              chainId: options.chainId,
+              transactionHash: log.transactionHash,
+              logIndex: log.logIndex,
+            }),
+            eventType: "payment.expired",
+            intent,
+            data: {
+              attemptIdentifier,
+              chainId: options.chainId,
+              transactionHash: log.transactionHash.toLowerCase(),
+              logIndex: log.logIndex,
+            },
+          });
         } else if (eventName === "PaymentSettled") {
           const transactionHash = log.transactionHash.toLowerCase();
-          await transaction.paymentIntent.update({
+          const settledIntent = await transaction.paymentIntent.update({
             where: { id: intent.id },
             data: {
               status: "SETTLED",
@@ -340,23 +395,91 @@ export async function processArcLog(
               errorMessage: null,
             },
           });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: chainWebhookEventId({
+              eventType: "payment.settled",
+              chainId: options.chainId,
+              transactionHash,
+              logIndex: log.logIndex,
+            }),
+            eventType: "payment.settled",
+            intent: settledIntent,
+            data: {
+              chainId: options.chainId,
+              transactionHash,
+              logIndex: log.logIndex,
+              invoiceAmount: bigintArg(args, "invoiceAmount").toString(),
+              merchantAmount: bigintArg(args, "merchantAmount").toString(),
+              protocolFee: bigintArg(args, "protocolFee").toString(),
+              refundedExcess: bigintArg(args, "refundedExcess").toString(),
+            },
+          });
         } else if (eventName === "PaymentCancelled") {
-          await transaction.paymentIntent.update({
+          const cancelledIntent = await transaction.paymentIntent.update({
             where: { id: intent.id },
             data: { status: "CANCELLED" },
           });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: chainWebhookEventId({
+              eventType: "payment.cancelled",
+              chainId: options.chainId,
+              transactionHash: log.transactionHash,
+              logIndex: log.logIndex,
+            }),
+            eventType: "payment.cancelled",
+            intent: cancelledIntent,
+            data: {
+              chainId: options.chainId,
+              transactionHash: log.transactionHash.toLowerCase(),
+              logIndex: log.logIndex,
+            },
+          });
         } else if (eventName === "PaymentRefunded") {
-          await transaction.paymentIntent.update({
+          const refundedIntent = await transaction.paymentIntent.update({
             where: { id: intent.id },
             data: {
               status: "REFUNDED",
               refundedAmount: bigintArg(args, "amount"),
             },
           });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: chainWebhookEventId({
+              eventType: "payment.refunded",
+              chainId: options.chainId,
+              transactionHash: log.transactionHash,
+              logIndex: log.logIndex,
+            }),
+            eventType: "payment.refunded",
+            intent: refundedIntent,
+            data: {
+              chainId: options.chainId,
+              transactionHash: log.transactionHash.toLowerCase(),
+              logIndex: log.logIndex,
+              refundAddress: addressArg(args, "refundAddress"),
+              amount: bigintArg(args, "amount").toString(),
+            },
+          });
         } else if (eventName === "ExcessSwept") {
-          await transaction.paymentIntent.update({
+          const sweptIntent = await transaction.paymentIntent.update({
             where: { id: intent.id },
             data: { excessAmount: bigintArg(args, "amount") },
+          });
+          await enqueuePaymentWebhook(transaction, {
+            eventId: chainWebhookEventId({
+              eventType: "payment.excess_swept",
+              chainId: options.chainId,
+              transactionHash: log.transactionHash,
+              logIndex: log.logIndex,
+            }),
+            eventType: "payment.excess_swept",
+            intent: sweptIntent,
+            data: {
+              chainId: options.chainId,
+              transactionHash: log.transactionHash.toLowerCase(),
+              logIndex: log.logIndex,
+              refundAddress: addressArg(args, "refundAddress"),
+              amount: bigintArg(args, "amount").toString(),
+            },
           });
         }
       }

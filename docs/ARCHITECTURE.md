@@ -80,6 +80,10 @@ classDiagram
 - The worker treats source receipts, raw CCTP messages, and Arc USDC logs as the settlement evidence; an Iris `forwardTxHash` alone is insufficient.
 - Webhook delivery begins only after onchain-derived state changes.
 
+## Transactional webhook outbox
+
+Every payment lifecycle mutation and its immutable webhook event are written in the same database transaction. Arc event IDs include chain ID, transaction hash, and log index; offchain lifecycle IDs use the attempt, source transaction, CCTP message, or Arc mint identity. Endpoint deliveries reference that one event, use atomic `SKIP LOCKED` claims, recover stale claims, preserve attempt history, and enforce event sequence per invoice and endpoint. Replays and resends reuse the original event ID.
+
 ## Finalized indexing and settlement recovery
 
 The Arc indexer reads only the RPC `finalized` block, processes a bounded page in log order, and advances its durable cursor only after every log in that page succeeds. Replayed pages and duplicate logs are harmless because chain ID, transaction hash, and log index form the database identity. Cursor health records the observed head, finalized block, processed block, last success, and last error.

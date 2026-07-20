@@ -91,11 +91,16 @@ export const webhookInputSchema = z.object({
     .array(
       z.enum([
         "payment.intent.created",
+        "payment.attempt.created",
+        "payment.source_submitted",
         "payment.source_confirmed",
+        "payment.attestation_received",
         "payment.arc_minted",
         "payment.settled",
+        "payment.cancelled",
         "payment.expired",
         "payment.refunded",
+        "payment.excess_swept",
       ]),
     )
     .min(1),

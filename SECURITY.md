@@ -30,7 +30,7 @@ Quotes are issued and stored by the API, expire quickly, and are claimed atomica
 
 ## Backend and webhooks
 
-All request input is runtime-validated. Public IDs are UUIDs. Merchant mutations require a short-lived wallet-signature session or a hashed, scoped API key. Customer attempts require a valid EIP-712 payer signature plus the matching unexpired server quote. App Kit recovery persists and resumes the same successful-burn result instead of creating another burn. Webhook secrets are AES-256-GCM encrypted, destinations are HTTPS/allowlisted and checked against private-address SSRF, signatures cover `timestamp.rawBody`, and retries are bounded.
+All request input is runtime-validated. Public IDs are UUIDs. Merchant mutations require a short-lived wallet-signature session or a hashed, scoped API key. Customer attempts require a valid EIP-712 payer signature plus the matching unexpired server quote. App Kit recovery persists and resumes the same successful-burn result instead of creating another burn. Webhook secrets are AES-256-GCM encrypted, destinations are HTTPS/allowlisted and checked against private-address SSRF, signatures cover `timestamp.rawBody`, and retries are bounded. Lifecycle changes commit with deterministic outbox events, deliveries are atomically claimed and ordered per invoice, and replay reuses the event ID so receivers can deduplicate safely.
 
 ## Known limitations
 

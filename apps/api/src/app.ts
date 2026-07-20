@@ -11,7 +11,12 @@ import helmet from "helmet";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { fetchCheckoutQuote } from "@arc-checkout/cctp";
-import { prisma } from "@arc-checkout/database";
+import {
+  chainWebhookEventId,
+  enqueuePaymentWebhook,
+  lifecycleWebhookEventId,
+  prisma,
+} from "@arc-checkout/database";
 import {
   formatUsdc,
   addressSchema,
@@ -616,41 +621,53 @@ export function createApp(): Application {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 40)}-${randomBytes(4).toString("hex")}`;
-      const created = await prisma.paymentIntent.create({
-        data: {
-          slug,
-          orderId: input.orderId,
-          orderIdBytes32: orderIdToBytes32(input.orderId),
-          expectedAmount: parseUsdc(input.amount),
-          refundAddress: null,
-          payoutAddress: merchant.payoutAddress,
-          vaultAddress:
-            input.vaultAddress?.toLowerCase() ??
-            (config.DEMO_MODE ? demoVault(input.orderId) : null),
-          description: input.description ?? null,
-          metadataHash: input.metadata
-            ? `0x${createHash("sha256").update(JSON.stringify(input.metadata)).digest("hex")}`
-            : null,
-          expiresAt: new Date(input.expiresAt),
-          createTransactionHash: input.createTransactionHash ?? null,
-          merchantId: merchant.id,
-        },
-        include: { merchant: true },
-      });
-      const payload = jsonSafe({
-        ...created,
-        amount: formatUsdc(created.expectedAmount),
-        paymentUrl: `${config.NEXT_PUBLIC_APP_URL}/pay/${slug}`,
-        mode: config.DEMO_MODE ? "demo" : "testnet",
-      });
-      await prisma.idempotencyRecord.create({
-        data: {
-          key: idempotencyKey,
-          scope: "payment-intents",
-          response: payload,
-          statusCode: 201,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        },
+      const payload = await prisma.$transaction(async (transaction) => {
+        const created = await transaction.paymentIntent.create({
+          data: {
+            slug,
+            orderId: input.orderId,
+            orderIdBytes32: orderIdToBytes32(input.orderId),
+            expectedAmount: parseUsdc(input.amount),
+            refundAddress: null,
+            payoutAddress: merchant.payoutAddress,
+            vaultAddress:
+              input.vaultAddress?.toLowerCase() ??
+              (config.DEMO_MODE ? demoVault(input.orderId) : null),
+            description: input.description ?? null,
+            metadataHash: input.metadata
+              ? `0x${createHash("sha256").update(JSON.stringify(input.metadata)).digest("hex")}`
+              : null,
+            expiresAt: new Date(input.expiresAt),
+            createTransactionHash: input.createTransactionHash ?? null,
+            merchantId: merchant.id,
+          },
+          include: { merchant: true },
+        });
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.intent.created",
+            identity: `demo:${created.id}`,
+          }),
+          eventType: "payment.intent.created",
+          intent: created,
+          data: { vaultAddress: created.vaultAddress, demo: true },
+        });
+        const responsePayload = jsonSafe({
+          ...created,
+          amount: formatUsdc(created.expectedAmount),
+          paymentUrl: `${config.NEXT_PUBLIC_APP_URL}/pay/${slug}`,
+          mode: config.DEMO_MODE ? "demo" : "testnet",
+        });
+        await transaction.idempotencyRecord.create({
+          data: {
+            key: idempotencyKey,
+            scope: "payment-intents",
+            response: responsePayload,
+            statusCode: 201,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          },
+        });
+        return responsePayload;
       });
       response.status(201).json(payload);
     }),
@@ -760,6 +777,22 @@ export function createApp(): Application {
             },
             merchantId: merchant.id,
             paymentIntentId: intent.id,
+          },
+        });
+        await enqueuePaymentWebhook(transaction, {
+          eventId: chainWebhookEventId({
+            eventType: "payment.intent.created",
+            chainId: verified.chainId,
+            transactionHash: verified.transactionHash,
+            logIndex: verified.logIndex,
+          }),
+          eventType: "payment.intent.created",
+          intent,
+          data: {
+            chainId: verified.chainId,
+            transactionHash: verified.transactionHash.toLowerCase(),
+            logIndex: verified.logIndex,
+            vaultAddress: verified.vaultAddress,
           },
         });
         return intent;
@@ -961,21 +994,39 @@ export function createApp(): Application {
         response.json(jsonSafe(existing));
         return;
       }
-      const attempt = await prisma.paymentAttempt.create({
-        data: {
-          active: true,
-          vaultAddress: intent.vaultAddress,
-          orderIdBytes32: intent.orderIdBytes32,
-          sourceChainId: input.sourceChainId,
-          destinationChainId: 5_042_002,
-          customerAddress: input.customerAddress.toLowerCase(),
-          refundAddress: input.customerAddress.toLowerCase(),
-          destinationAmount: intent.expectedAmount,
-          quotedSourceAmount: intent.expectedAmount,
-          maximumSourceAmount: intent.expectedAmount,
-          status: "QUOTED",
-          paymentIntentId: intent.id,
-        },
+      const attempt = await prisma.$transaction(async (transaction) => {
+        const created = await transaction.paymentAttempt.create({
+          data: {
+            active: true,
+            vaultAddress: intent.vaultAddress,
+            orderIdBytes32: intent.orderIdBytes32,
+            sourceChainId: input.sourceChainId,
+            destinationChainId: 5_042_002,
+            customerAddress: input.customerAddress.toLowerCase(),
+            refundAddress: input.customerAddress.toLowerCase(),
+            destinationAmount: intent.expectedAmount,
+            quotedSourceAmount: intent.expectedAmount,
+            maximumSourceAmount: intent.expectedAmount,
+            status: "QUOTED",
+            paymentIntentId: intent.id,
+          },
+        });
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.attempt.created",
+            identity: `demo:${created.id}`,
+          }),
+          eventType: "payment.attempt.created",
+          intent,
+          data: {
+            attemptId: created.id,
+            sourceChainId: created.sourceChainId,
+            customerAddress: created.customerAddress,
+            refundAddress: created.refundAddress,
+            demo: true,
+          },
+        });
+        return created;
       });
       response.status(201).json(jsonSafe(attempt));
     }),
@@ -1135,7 +1186,7 @@ export function createApp(): Application {
             data: { active: false, status: "EXPIRED" },
           });
         }
-        return transaction.paymentAttempt.create({
+        const created = await transaction.paymentAttempt.create({
           data: {
             attemptIdentifier: input.attemptId.toLowerCase(),
             active: true,
@@ -1161,6 +1212,22 @@ export function createApp(): Application {
             status: "QUOTED",
           },
         });
+        await enqueuePaymentWebhook(transaction, {
+          eventId: lifecycleWebhookEventId({
+            eventType: "payment.attempt.created",
+            identity: input.attemptId,
+          }),
+          eventType: "payment.attempt.created",
+          intent,
+          data: {
+            attemptId: created.id,
+            attemptIdentifier: input.attemptId.toLowerCase(),
+            sourceChainId: created.sourceChainId,
+            customerAddress: created.customerAddress,
+            refundAddress: created.refundAddress,
+          },
+        });
+        return created;
       });
       const payload = jsonSafe(attempt);
       delete payload.clientSecretHash;
@@ -1196,6 +1263,7 @@ export function createApp(): Application {
       const input = paymentAttemptProgressSchema.parse(request.body);
       const attempt = await prisma.paymentAttempt.findUnique({
         where: { id: String(request.params.id) },
+        include: { paymentIntent: true },
       });
       if (!attempt) {
         response.status(404).json({ error: "Payment attempt not found" });
@@ -1297,27 +1365,48 @@ export function createApp(): Application {
           .json({ error: "Recoverable BridgeResult is required" });
         return;
       }
-      const updated = await prisma.paymentAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: input.status,
-          registeredTransactionHash,
-          sourceTransactionHash,
-          ...(input.bridgeResult === undefined
-            ? {}
-            : {
-                bridgeResult: jsonSafe(input.bridgeResult),
-              }),
-          bridgeRecoverable: input.status === "RECOVERABLE",
-          errorCode:
-            input.status === "RECOVERABLE"
-              ? (input.errorCode ?? attempt.errorCode)
-              : null,
-          errorMessage:
-            input.status === "RECOVERABLE"
-              ? (input.errorMessage ?? attempt.errorMessage)
-              : null,
-        },
+      const updated = await prisma.$transaction(async (transaction) => {
+        const progress = await transaction.paymentAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: input.status,
+            registeredTransactionHash,
+            sourceTransactionHash,
+            ...(input.bridgeResult === undefined
+              ? {}
+              : {
+                  bridgeResult: jsonSafe(input.bridgeResult),
+                }),
+            bridgeRecoverable: input.status === "RECOVERABLE",
+            errorCode:
+              input.status === "RECOVERABLE"
+                ? (input.errorCode ?? attempt.errorCode)
+                : null,
+            errorMessage:
+              input.status === "RECOVERABLE"
+                ? (input.errorMessage ?? attempt.errorMessage)
+                : null,
+          },
+        });
+        if (
+          ["BURN_SUBMITTED", "RECOVERABLE"].includes(input.status) &&
+          sourceTransactionHash
+        ) {
+          await enqueuePaymentWebhook(transaction, {
+            eventId: lifecycleWebhookEventId({
+              eventType: "payment.source_submitted",
+              identity: `${attempt.sourceChainId}:${sourceTransactionHash}`,
+            }),
+            eventType: "payment.source_submitted",
+            intent: attempt.paymentIntent,
+            data: {
+              attemptId: attempt.id,
+              sourceChainId: attempt.sourceChainId,
+              sourceTransactionHash,
+            },
+          });
+        }
+        return progress;
       });
       const payload = jsonSafe(updated);
       delete payload.clientSecretHash;
@@ -1375,10 +1464,117 @@ export function createApp(): Application {
           events: true,
           active: true,
           createdAt: true,
-          deliveries: { orderBy: { createdAt: "desc" }, take: 10 },
+          deliveries: {
+            orderBy: { createdAt: "desc" },
+            take: 10,
+            include: {
+              event: true,
+              history: { orderBy: { attemptNumber: "desc" }, take: 10 },
+            },
+          },
         },
       });
       response.json(jsonSafe(endpoints));
+    }),
+  );
+
+  app.post(
+    "/api/webhooks/deliveries/:id/replay",
+    merchantGuard("webhooks:write"),
+    asyncRoute(async (request, response) => {
+      const principal = authenticatedMerchant(response);
+      const delivery = await prisma.webhookDelivery.findUnique({
+        where: { id: String(request.params.id) },
+        include: { webhookEndpoint: true, event: true },
+      });
+      if (!delivery) {
+        response.status(404).json({ error: "Webhook delivery not found" });
+        return;
+      }
+      if (principal?.merchantId !== delivery.webhookEndpoint.merchantId)
+        throw new AuthError(
+          "Webhook delivery belongs to another merchant",
+          403,
+        );
+      if (delivery.status !== "FAILED") {
+        response.status(409).json({
+          error: "Only permanently failed deliveries can be replayed",
+        });
+        return;
+      }
+      const replayed = await prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "PENDING",
+          retryCount: 0,
+          replayCount: { increment: 1 },
+          nextAttemptAt: new Date(),
+          deliveredAt: null,
+          lastStatusCode: null,
+          lastError: null,
+          lockToken: null,
+          lockedAt: null,
+        },
+        include: { event: true },
+      });
+      response.json(jsonSafe(replayed));
+    }),
+  );
+
+  app.post(
+    "/api/webhooks/events/:id/resend",
+    merchantGuard("webhooks:write"),
+    asyncRoute(async (request, response) => {
+      const principal = authenticatedMerchant(response);
+      const event = await prisma.webhookEvent.findUnique({
+        where: { id: String(request.params.id) },
+      });
+      if (!event) {
+        response.status(404).json({ error: "Webhook event not found" });
+        return;
+      }
+      if (principal?.merchantId !== event.merchantId)
+        throw new AuthError("Webhook event belongs to another merchant", 403);
+      const endpoints = await prisma.webhookEndpoint.findMany({
+        where: {
+          merchantId: event.merchantId,
+          active: true,
+          events: { has: event.eventType },
+        },
+        select: { id: true },
+      });
+      const endpointIds = endpoints.map((endpoint) => endpoint.id);
+      const resent = await prisma.$transaction(async (transaction) => {
+        if (endpointIds.length > 0) {
+          await transaction.webhookDelivery.createMany({
+            data: endpointIds.map((webhookEndpointId) => ({
+              eventId: event.id,
+              webhookEndpointId,
+            })),
+            skipDuplicates: true,
+          });
+          return transaction.webhookDelivery.updateMany({
+            where: {
+              eventId: event.id,
+              webhookEndpointId: { in: endpointIds },
+              status: { not: "PROCESSING" },
+            },
+            data: {
+              status: "PENDING",
+              retryCount: 0,
+              replayCount: { increment: 1 },
+              nextAttemptAt: new Date(),
+              deliveredAt: null,
+              lastStatusCode: null,
+              lastError: null,
+              lockToken: null,
+              lockedAt: null,
+            },
+          });
+        }
+        return { count: 0 };
+      });
+      response.json({ eventId: event.id, queuedDeliveries: resent.count });
     }),
   );
 
@@ -1399,8 +1595,9 @@ export function createApp(): Application {
         throw new AuthError("Webhook belongs to another merchant", 403);
       await assertSafeWebhookUrl(endpoint.url);
       const timestamp = Math.floor(Date.now() / 1000).toString();
+      const eventId = crypto.randomUUID();
       const body = JSON.stringify({
-        id: crypto.randomUUID(),
+        id: eventId,
         type: "webhook.test",
         timestamp: new Date().toISOString(),
         merchantId: endpoint.merchantId,
@@ -1417,6 +1614,7 @@ export function createApp(): Application {
         headers: {
           "content-type": "application/json",
           "user-agent": "Arc-Checkout-Webhook/1.0",
+          "x-arc-event-id": eventId,
           "x-arc-timestamp": timestamp,
           "x-arc-signature": `v1=${signature}`,
         },

@@ -10,3 +10,4 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalDatabase.prisma = prisma;
 export * from "@prisma/client";
+export * from "./webhook-outbox.js";
