@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+export {
+  createBrandConfig,
+  DEFAULT_PRODUCT_NAME,
+  type BrandConfig,
+} from "./brand.js";
+
 export const addressSchema = z
   .string()
   .regex(/^0x[a-fA-F0-9]{40}$/, "Invalid EVM address");

@@ -213,9 +213,10 @@ export default function CreateInvoicePage() {
   return (
     <div className="page-shell">
       <div className="section-kicker">NEW PAYMENT INTENT</div>
-      <h1 className="page-title">Create an Arc-settled invoice.</h1>
+      <h1 className="page-title">Create a payment link.</h1>
       <p className="page-subtitle">
-        The vault payout address and protocol fee are locked at creation.
+        Every invoice settles to a dedicated Arc vault. The payout address and
+        protocol fee are locked at creation.
       </p>
       {!factoryAddress && (
         <div className="demo-banner">

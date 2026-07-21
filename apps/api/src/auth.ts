@@ -68,7 +68,7 @@ export function buildMerchantSignInMessage(input: {
   expiresAt: Date;
   uri: string;
 }): string {
-  return `${input.domain} wants you to sign in with your Ethereum account:\n${input.walletAddress}\n\nSign in to Arc Crosschain Checkout.\n\nURI: ${input.uri}\nVersion: 1\nChain ID: ${input.chainId}\nNonce: ${input.nonce}\nIssued At: ${input.issuedAt.toISOString()}\nExpiration Time: ${input.expiresAt.toISOString()}\nRequest ID: ${input.id}`;
+  return `${input.domain} wants you to sign in with your Ethereum account:\n${input.walletAddress}\n\nSign in to SettleLink.\n\nURI: ${input.uri}\nVersion: 1\nChain ID: ${input.chainId}\nNonce: ${input.nonce}\nIssued At: ${input.issuedAt.toISOString()}\nExpiration Time: ${input.expiresAt.toISOString()}\nRequest ID: ${input.id}`;
 }
 
 export async function verifyAuthChallenge(input: {

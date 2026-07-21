@@ -30,6 +30,7 @@ import {
   refundIsPermitted,
 } from "@/lib/payment-recovery";
 import { WalletButton } from "@/components/wallet-button";
+import { brand } from "@/lib/brand";
 
 type Invoice = {
   id: string;
@@ -479,7 +480,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         } as const;
         const typedData = {
           domain: {
-            name: "Arc Crosschain Checkout",
+            name: brand.productName,
             version: "1",
             chainId: arcTestnet.id,
             verifyingContract: authorization.invoiceVault,
@@ -945,7 +946,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
           <div className="merchant-line">
             <div>
               <div className="section-kicker">PAYMENT REQUEST</div>
-              <h1>{invoice.merchant.displayName ?? "Arc merchant"}</h1>
+              <h1>{invoice.merchant.displayName ?? "Merchant"}</h1>
             </div>
             <span
               className={`status-badge ${invoice.status === "OPEN" ? "pending" : ""}`}
@@ -1228,6 +1229,11 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
             Attestation delays are recoverable. Progress is saved on this device
             without storing wallet credentials.
           </p>
+          <div className="checkout-operator">
+            <strong>Powered by {brand.productName}</strong>
+            <span>Crosschain transfer via Circle CCTP</span>
+            <span>Final settlement on Arc</span>
+          </div>
           {savedAttemptId && (
             <div className="recovery-panel" aria-live="polite">
               <div className="section-kicker">RECOVERED BACKEND STATE</div>

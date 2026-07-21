@@ -168,8 +168,8 @@ export function DashboardClient() {
           <div className="section-kicker">MERCHANT OVERVIEW</div>
           <h1 className="page-title">Connect your merchant wallet.</h1>
           <p className="page-subtitle">
-            Dashboard data is scoped to the wallet that signs the Arc merchant
-            session.
+            Dashboard data is scoped to the wallet that signs the SettleLink
+            merchant session. Settlement records are verified against Arc.
           </p>
           <WalletButton />
         </div>
@@ -183,7 +183,7 @@ export function DashboardClient() {
         <div>
           <div className="section-kicker">MERCHANT OVERVIEW</div>
           <h1 className="page-title">
-            {dashboard?.merchant.name ?? "Your Arc checkout"}
+            {dashboard?.merchant.name ?? "Your SettleLink checkout"}
           </h1>
           <p className="page-subtitle">
             Payout{" "}

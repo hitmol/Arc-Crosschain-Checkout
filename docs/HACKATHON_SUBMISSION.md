@@ -2,7 +2,7 @@
 
 ## Project name
 
-Arc Crosschain Checkout
+SettleLink
 
 ## One-line description
 

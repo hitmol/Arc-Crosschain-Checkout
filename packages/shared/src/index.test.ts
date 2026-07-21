@@ -1,11 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
+  createBrandConfig,
+  DEFAULT_PRODUCT_NAME,
   formatUsdc,
   orderIdToBytes32,
   parseUsdc,
   paymentAttemptInputSchema,
   paymentIntentInputSchema,
 } from "./index.js";
+
+describe("brand configuration", () => {
+  it("uses SettleLink by default and accepts a safe deployment override", () => {
+    expect(createBrandConfig().productName).toBe(DEFAULT_PRODUCT_NAME);
+    expect(createBrandConfig("Merchant Pay").productName).toBe("Merchant Pay");
+  });
+
+  it("rejects markup and overlong names", () => {
+    expect(createBrandConfig("<script>alert(1)</script>").productName).toBe(
+      DEFAULT_PRODUCT_NAME,
+    );
+    expect(createBrandConfig("x".repeat(41)).productName).toBe(
+      DEFAULT_PRODUCT_NAME,
+    );
+  });
+});
 
 describe("USDC amount utilities", () => {
   it("round trips six-decimal values", () => {

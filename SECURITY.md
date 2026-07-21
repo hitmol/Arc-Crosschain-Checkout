@@ -10,7 +10,7 @@ The factory owner may pause only new invoice creation. The registry owner may de
 
 ## Customer payment authorization
 
-Invoice creation does not set a refund recipient. Before any supported CCTP burn, the payer signs an EIP-712 `PaymentAuthorization` whose domain is `Arc Crosschain Checkout`, version `1`, Arc chain ID `5042002`, and the deterministic invoice vault. The signed message binds the attempt ID, source and destination chains, vault, order ID, payer, customer Arc refund address, destination amount, maximum source amount, quote expiry, nonce, and attempt expiry.
+Invoice creation does not set a refund recipient. Before any supported CCTP burn, the payer signs an EIP-712 `PaymentAuthorization` whose domain is `SettleLink`, version `1`, Arc chain ID `5042002`, and the deterministic invoice vault. The signed message binds the attempt ID, source and destination chains, vault, order ID, payer, customer Arc refund address, destination amount, maximum source amount, quote expiry, nonce, and attempt expiry.
 
 The first valid onchain authorization permanently locks the payer and refund address. An expired registered attempt may be replaced only by the same payer using the same refund address and a fresh nonce/attempt ID. Used nonces and attempt IDs cannot be replayed. Refunds remain on Arc and are never automatically bridged to the source chain.
 

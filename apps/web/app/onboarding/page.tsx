@@ -103,9 +103,10 @@ export default function OnboardingPage() {
   return (
     <div className="page-shell">
       <div className="section-kicker">MERCHANT SETUP</div>
-      <h1 className="page-title">Register on Arc.</h1>
+      <h1 className="page-title">Set up your merchant account.</h1>
       <p className="page-subtitle">
-        Your payout address is snapshotted into every new invoice vault.
+        Your payout address is registered on Arc and snapshotted into every new
+        invoice vault.
       </p>
       {!registryAddress && (
         <div className="demo-banner">

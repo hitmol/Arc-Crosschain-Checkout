@@ -1,8 +1,10 @@
-# Arc Crosschain Checkout
+# SettleLink
 
-Accept USDC from multiple chains through one payment link and settle every invoice on Arc.
+Accept USDC across supported chains through one payment link and settle every invoice on Arc.
 
-Merchants should not need to integrate separate bridges, destination gas flows, and reconciliation logic just because customers hold USDC on different chains. Arc Crosschain Checkout creates one deterministic vault per invoice on Arc, uses Circle CCTP V2 to route native USDC from Base Sepolia or Ethereum Sepolia, and finalizes merchant payout with a permissionless onchain settlement.
+Merchants should not need to integrate separate bridges, destination gas flows, and reconciliation logic just because customers hold USDC on different chains. SettleLink creates one deterministic vault per invoice on Arc, uses Circle CCTP V2 to route native USDC from Base Sepolia or Ethereum Sepolia, and finalizes merchant payout with a permissionless onchain settlement.
+
+SettleLink is an independent product. Arc is the destination settlement infrastructure and Circle CCTP is the crosschain transfer protocol. This project is not affiliated with or endorsed by Circle or Arc. All trademarks are property of their respective owners.
 
 > Status: complete local/testnet-ready MVP. Arc Testnet deployment and real transaction evidence are pending deployer credentials and funded testnet wallets. The contracts have not been audited.
 
@@ -21,6 +23,8 @@ flowchart LR
 ```
 
 Arc is not a network-selector add-on: the invoice vault, final settlement event, fee distribution, merchant payout, refund path, and source of truth all live on Arc. Arc uses USDC for gas and offers deterministic sub-second finality.
+
+Public brand usage follows the principle “SettleLink leads; Arc is infrastructure.” See [brand compliance](docs/BRAND_COMPLIANCE.md) and the [migration record](docs/BRAND_MIGRATION.md).
 
 ## Supported routes
 

@@ -4,6 +4,7 @@ import { Check, Clock3, Download, ExternalLink, Printer } from "lucide-react";
 import type { ReactNode } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { compactAddress } from "@/lib/api";
+import { brand } from "@/lib/brand";
 import type {
   AddressView,
   TransactionView,
@@ -235,7 +236,7 @@ export function ReceiptView({ receipt }: { receipt: VerifiedReceipt }) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `arc-receipt-${receipt.invoice.slug}.json`;
+    anchor.download = `settlelink-receipt-${receipt.invoice.slug}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -245,13 +246,18 @@ export function ReceiptView({ receipt }: { receipt: VerifiedReceipt }) {
       <article className="card receipt-card">
         <header className="receipt-header">
           <div>
-            <div className="section-kicker">VERIFIED PAYMENT RECEIPT</div>
+            <div className="section-kicker">
+              {brand.productName.toUpperCase()} PAYMENT RECEIPT
+            </div>
             <h1 className="page-title">
               {receipt.invoice.amount} USDC · {receipt.invoice.status}
             </h1>
             <p className="page-subtitle">
               Order {receipt.invoice.orderId} · receipt v
               {receipt.receiptVersion}
+            </p>
+            <p className="receipt-attribution">
+              Crosschain transfer via Circle CCTP · final settlement on Arc
             </p>
           </div>
           <span className={`receipt-check ${settled ? "" : "pending"}`}>

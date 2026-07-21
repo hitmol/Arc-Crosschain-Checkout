@@ -1,15 +1,31 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #111b19;
-  --muted: #62706d;
-  --line: #dce5e1;
-  --paper: #f4f7f5;
-  --white: #fff;
-  --mint: #bdfbe3;
-  --green: #135c49;
-  --lime: #d9ff64;
-  --navy: #102c2b;
+  color-scheme: light;
+  --brand-primary: #4744d7;
+  --brand-primary-hover: #3632bd;
+  --brand-accent: #ff8d61;
+  --brand-ink: #17182a;
+  --brand-muted: #646579;
+  --brand-surface: #f7f7fc;
+  --brand-surface-raised: #ffffff;
+  --brand-border: #dcddeb;
+  --brand-success: #13846b;
+  --brand-warning: #a86618;
+  --brand-danger: #b83d4a;
+  --brand-focus: #6966ed;
+  --brand-dark: #1b1c32;
+  --brand-mark-route: #ffffff;
+  --brand-mark-accent: #ff9a6c;
+  --ink: var(--brand-ink);
+  --muted: var(--brand-muted);
+  --line: var(--brand-border);
+  --paper: var(--brand-surface);
+  --white: var(--brand-surface-raised);
+  --mint: #d9d8ff;
+  --green: var(--brand-primary);
+  --lime: var(--brand-accent);
+  --navy: var(--brand-dark);
 }
 * {
   box-sizing: border-box;
@@ -22,6 +38,10 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body), sans-serif;
+}
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand-focus) 55%, transparent);
+  outline-offset: 3px;
 }
 a {
   color: inherit;
@@ -59,11 +79,9 @@ main {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  display: grid;
-  place-items: center;
-  background: var(--ink);
-  color: var(--lime);
-  font-size: 15px;
+  display: block;
+  color: var(--brand-primary);
+  flex: 0 0 auto;
 }
 .brand.compact {
   font-size: 16px;
@@ -79,7 +97,7 @@ main {
   color: #465552;
 }
 .site-header nav a:hover {
-  color: var(--green);
+  color: var(--brand-primary);
 }
 .wallet-button {
   border: 1px solid #bfcbc7;
@@ -158,11 +176,11 @@ main {
   cursor: pointer;
 }
 .button.primary {
-  background: var(--ink);
+  background: var(--brand-primary);
   color: white;
 }
 .button.primary:hover {
-  background: var(--green);
+  background: var(--brand-primary-hover);
 }
 .button.secondary {
   border-color: #c7d2ce;
@@ -1275,5 +1293,310 @@ footer > div:first-child {
     border: 0;
     box-shadow: none;
     margin: 0;
+  }
+}
+
+/* SettleLink brand layer. These rules intentionally keep Arc network colors out
+   of the product identity; network badges are functional route indicators. */
+.site-header {
+  position: relative;
+  z-index: 20;
+}
+.site-header nav {
+  color: var(--brand-muted);
+}
+.wallet-button,
+.button.secondary,
+.dashboard-loading,
+.dashboard-filters input,
+.dashboard-filters select {
+  background: var(--brand-surface-raised);
+  border-color: var(--brand-border);
+}
+.wallet-button.connected {
+  background: #eeedff;
+}
+.hero {
+  min-height: 700px;
+  padding: 84px 0 96px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(340px, 0.82fr);
+  align-items: center;
+  gap: clamp(40px, 7vw, 100px);
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 520px;
+  height: 520px;
+  right: 0;
+  top: 55px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #dbdafe 0%, transparent 68%);
+  opacity: 0.72;
+  pointer-events: none;
+}
+.hero-copy-column {
+  min-width: 0;
+}
+.hero h1 {
+  max-width: 760px;
+  font-size: clamp(52px, 6.6vw, 86px);
+  margin-bottom: 26px;
+}
+.hero h1 span {
+  color: var(--brand-primary);
+}
+.hero-copy {
+  max-width: 610px;
+}
+.infrastructure-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  color: var(--brand-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.checkout-preview {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  max-width: 420px;
+  justify-self: end;
+  transform: rotate(0.7deg);
+  background: var(--brand-surface-raised);
+  border-color: var(--brand-border);
+  box-shadow: 0 30px 90px #3632bd24;
+  padding: 24px;
+}
+.preview-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--brand-border);
+}
+.preview-brand .brand {
+  font-size: 14px;
+}
+.preview-brand .brand-mark {
+  width: 25px;
+  height: 25px;
+}
+.pill.open {
+  background: #e7f7f1;
+  color: var(--brand-success);
+}
+.route-card {
+  background: color-mix(in srgb, var(--brand-surface) 70%, transparent);
+}
+.chain-icon.destination {
+  background: var(--brand-dark);
+  color: var(--brand-surface-raised);
+}
+.checkout-preview button {
+  background: var(--brand-primary);
+}
+.checkout-preview button:hover {
+  background: var(--brand-primary-hover);
+}
+.network-strip {
+  background: var(--brand-surface-raised);
+}
+.network-strip em {
+  background: #eeedff;
+  color: var(--brand-primary);
+}
+.flow-grid article,
+.feature-cards article,
+.card,
+.table-card,
+.receipt-card {
+  background: var(--brand-surface-raised);
+}
+.feature-band {
+  position: relative;
+  overflow: hidden;
+  background: var(--brand-dark);
+}
+.feature-band::after {
+  content: "";
+  position: absolute;
+  width: 460px;
+  height: 460px;
+  right: -180px;
+  bottom: -300px;
+  border: 1px solid #ffffff26;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 70px #ffffff09,
+    0 0 0 140px #ffffff07;
+}
+.section-kicker.light,
+.feature-grid a {
+  color: #bbb9ff;
+}
+.feature-grid > div > p {
+  color: #c8c8d8;
+}
+.metric-stack div {
+  background: #272842;
+  border-color: #ffffff17;
+}
+.feature-trust {
+  margin: 32px 0 0;
+}
+.tx-link,
+.docs-content a {
+  color: var(--brand-primary);
+}
+.checkout-operator {
+  display: grid;
+  gap: 5px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--brand-border);
+}
+.checkout-operator strong {
+  font: 750 14px var(--font-display);
+}
+.checkout-operator span,
+.receipt-attribution {
+  color: var(--brand-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.receipt-attribution {
+  margin: 20px 0 0;
+}
+.infrastructure-callout {
+  padding: 16px 18px;
+  border: 1px solid var(--brand-border);
+  border-left: 3px solid var(--brand-primary);
+  border-radius: 10px;
+  background: var(--brand-surface-raised);
+}
+.code-block {
+  background: var(--brand-dark);
+  color: #f0efff;
+}
+footer {
+  align-items: flex-start;
+}
+footer > div:first-child {
+  display: grid;
+  gap: 8px;
+}
+footer p,
+footer small {
+  margin: 0;
+  color: var(--brand-muted);
+}
+footer small {
+  max-width: 570px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.footer-links {
+  flex-wrap: wrap;
+}
+.footer-links > span {
+  font-weight: 750;
+  color: var(--brand-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --brand-ink: #f4f3fb;
+    --brand-muted: #aaaabd;
+    --brand-surface: #12131f;
+    --brand-surface-raised: #1b1c2c;
+    --brand-border: #35364c;
+    --brand-dark: #0d0e18;
+    --brand-primary: #8d8aff;
+    --brand-primary-hover: #a7a5ff;
+    --brand-focus: #aaa8ff;
+  }
+  .wallet-button.connected,
+  .pill.open,
+  .network-strip em {
+    background: #292a46;
+  }
+  .checkout-preview,
+  .flow-grid,
+  .final-cta,
+  .card,
+  .table-card {
+    box-shadow: none;
+  }
+  .final-cta {
+    color: #17182a;
+  }
+  .final-cta .section-kicker {
+    color: #4744d7;
+  }
+  input,
+  select,
+  textarea {
+    color: var(--brand-ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+  .checkout-preview {
+    margin: 10px auto 0;
+    justify-self: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .hero {
+    padding-top: 54px;
+    gap: 44px;
+  }
+  .hero h1 {
+    font-size: clamp(42px, 12vw, 54px);
+  }
+  .hero-actions {
+    align-items: stretch;
+  }
+  .hero-actions .button {
+    width: 100%;
+  }
+  .infrastructure-line {
+    flex-direction: row;
+  }
+  .preview-brand .brand > span:last-child {
+    display: inline;
+  }
+  .site-header .brand > span:last-child {
+    display: inline;
+  }
+  .network-strip {
+    justify-content: flex-start;
   }
 }

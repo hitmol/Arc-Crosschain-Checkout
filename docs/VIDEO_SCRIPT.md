@@ -6,7 +6,7 @@
 
 ## 0:20–0:40 — Solution
 
-“Arc Crosschain Checkout turns one order into one payment link. Customers pay native USDC from a supported chain; the merchant always settles on Arc.” Open the landing page and route strip.
+“SettleLink turns one order into one payment link. Customers pay native USDC from a supported chain; the merchant always settles on Arc.” Open the landing page and route strip.
 
 ## 0:40–1:05 — Create invoice
 

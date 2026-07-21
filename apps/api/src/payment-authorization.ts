@@ -5,6 +5,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
+import { DEFAULT_PRODUCT_NAME } from "@arc-checkout/shared";
 
 export const paymentAuthorizationTypes = {
   PaymentAuthorization: [
@@ -40,7 +41,7 @@ export type PaymentAuthorizationMessage = {
 
 export function paymentAuthorizationDomain(invoiceVault: Address) {
   return {
-    name: "Arc Crosschain Checkout",
+    name: DEFAULT_PRODUCT_NAME,
     version: "1",
     chainId: 5_042_002,
     verifyingContract: invoiceVault,

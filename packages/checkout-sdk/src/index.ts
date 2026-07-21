@@ -85,7 +85,7 @@ export class ArcCheckout {
       const message =
         typeof payload.error === "string"
           ? payload.error
-          : "Arc Checkout request failed";
+          : "SettleLink request failed";
       throw new ArcCheckoutError(
         message,
         response.status,

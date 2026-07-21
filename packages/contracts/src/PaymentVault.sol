@@ -123,7 +123,7 @@ contract PaymentVault is EIP712 {
     event ExcessSwept(bytes32 indexed orderId, address indexed refundAddress, uint256 amount);
     event UnsupportedTokenRecovered(address indexed token, address indexed recipient, uint256 amount);
 
-    constructor() EIP712("Arc Crosschain Checkout", "1") {
+    constructor() EIP712("SettleLink", "1") {
         initialized = true;
     }
 

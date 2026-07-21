@@ -6,7 +6,7 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IMerchantRegistry} from "./interfaces/ICheckout.sol";
 
 /// @title MerchantRegistry
-/// @notice Self-service registry for Arc Crosschain Checkout merchants.
+/// @notice Self-service registry for SettleLink merchants.
 contract MerchantRegistry is Ownable2Step, IMerchantRegistry {
     error AlreadyRegistered();
     error MerchantNotFound();

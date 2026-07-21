@@ -3,7 +3,7 @@ import { config } from "./config.js";
 
 const server = createApp().listen(config.API_PORT, "0.0.0.0", () => {
   console.log(
-    `Arc Checkout API listening on http://localhost:${config.API_PORT}`,
+    `SettleLink API listening on http://localhost:${config.API_PORT}`,
   );
 });
 

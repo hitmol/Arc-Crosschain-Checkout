@@ -1,16 +1,35 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
-import { Providers } from "@/components/providers";
+import { BrandMark } from "@/components/brand-mark";
 import { Header } from "@/components/header";
+import { Providers } from "@/components/providers";
+import { brand } from "@/lib/brand";
 import "./globals.css";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-body" });
 const space = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 
 export const metadata: Metadata = {
-  title: { default: "Arc Crosschain Checkout", template: "%s · Arc Checkout" },
-  description:
-    "Accept USDC from multiple chains through one payment link and settle every invoice on Arc.",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+  ),
+  applicationName: brand.productName,
+  title: {
+    default: `${brand.productName} — Crosschain USDC checkout`,
+    template: `%s · ${brand.productName}`,
+  },
+  description: brand.shortDescription,
+  openGraph: {
+    type: "website",
+    title: `${brand.productName} — Crosschain USDC checkout`,
+    description: brand.shortDescription,
+    siteName: brand.productName,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${brand.productName} — Crosschain USDC checkout`,
+    description: brand.shortDescription,
+  },
 };
 
 export default function RootLayout({
@@ -25,14 +44,15 @@ export default function RootLayout({
           <footer>
             <div>
               <span className="brand compact">
-                <span className="brand-mark">A</span>Arc Checkout
+                <BrandMark className="brand-mark" />
+                {brand.productName}
               </span>
-              <p>
-                Non-custodial USDC checkout. Testnet software — not audited for
-                production.
-              </p>
+              <p>{brand.shortDescription}</p>
+              <small>{brand.legalDisclaimer}</small>
             </div>
             <div className="footer-links">
+              <span>{brand.infrastructureAttribution}</span>
+              <span>{brand.protocolAttribution}</span>
               <a href="https://docs.arc.io" target="_blank" rel="noreferrer">
                 Arc docs
               </a>
