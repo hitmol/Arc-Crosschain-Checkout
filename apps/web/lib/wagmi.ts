@@ -1,5 +1,6 @@
 import { createConfig, http, type CreateConnectorFn } from "wagmi";
 import { injected, walletConnect } from "wagmi/connectors";
+import { fallback } from "viem";
 import { arcTestnet, baseSepolia, sepolia } from "viem/chains";
 import { brand } from "./brand";
 import { resolveWalletPublicConfig } from "./wallet-connection";
@@ -39,9 +40,22 @@ export const wagmiConfig = createConfig({
   connectors,
   multiInjectedProviderDiscovery: true,
   transports: {
-    [arcTestnet.id]: http("https://rpc.testnet.arc.network"),
+    [arcTestnet.id]: fallback(
+      [
+        http("https://rpc.testnet.arc.network", {
+          retryCount: 2,
+          retryDelay: 250,
+          timeout: 10_000,
+        }),
+        http("/api/arc-rpc", {
+          retryCount: 1,
+          timeout: 15_000,
+        }),
+      ],
+      { rank: false },
+    ),
     [baseSepolia.id]: http("https://sepolia.base.org"),
-    [sepolia.id]: http("https://ethereum-sepolia-rpc.publicnode.com")
+    [sepolia.id]: http("https://ethereum-sepolia-rpc.publicnode.com"),
   },
   ssr: true
 });
