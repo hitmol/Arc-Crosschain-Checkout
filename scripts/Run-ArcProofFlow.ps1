@@ -58,14 +58,18 @@ function Invoke-CastWithPassword {
   }
 }
 
-function Invoke-CastRead([string[]]$Arguments) {
+function Invoke-CastRead {
+  param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Arguments
+  )
   $output = & $cast @Arguments 2>&1
   if ($LASTEXITCODE -ne 0) { throw ($output -join [Environment]::NewLine) }
   return ($output -join [Environment]::NewLine).Trim()
 }
 
 function Get-ContractLogs([string]$Address, [int64]$FromBlock = 52933000) {
-  $raw = Invoke-CastRead @(
+  $raw = Invoke-CastRead -Arguments @(
     "logs", "--json", "--address", $Address,
     "--from-block", "$FromBlock", "--to-block", "latest",
     "--rpc-url", $rpcUrl
@@ -178,7 +182,7 @@ try {
   Write-Host "Customer: $customer"
   Write-Host "Treasury: $treasury"
 
-  $merchantRecord = Invoke-CastRead @(
+  $merchantRecord = Invoke-CastRead -Arguments @(
     "call", $registry, "merchantOf(address)((address,address,bytes32,bool,uint64))",
     $merchant, "--rpc-url", $rpcUrl
   )
@@ -192,7 +196,7 @@ try {
     Write-Host "Using existing merchant registration: $registerHash" -ForegroundColor Yellow
   }
   else {
-    $merchantMetadata = Invoke-CastRead @("keccak", "SettleLink public proof merchant")
+    $merchantMetadata = Invoke-CastRead -Arguments @("keccak", "SettleLink public proof merchant")
     $register = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
       -To $registry -Signature "registerMerchant(address,bytes32)" `
       -FunctionArguments @($merchant, $merchantMetadata)
@@ -203,16 +207,16 @@ try {
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
   $quoteExpiresAt = $now + 1800
   $attemptExpiresAt = $now + 3600
-  $attemptId = Invoke-CastRead @("keccak", "SETTLELINK-ATTEMPT-$now-$customer")
-  $vaultList = Invoke-CastRead @(
+  $attemptId = Invoke-CastRead -Arguments @("keccak", "SETTLELINK-ATTEMPT-$now-$customer")
+  $vaultList = Invoke-CastRead -Arguments @(
     "call", $factory, "merchantVaults(address)(address[])",
     $merchant, "--rpc-url", $rpcUrl
   )
   $existingVaults = [regex]::Matches($vaultList, '0x[0-9a-fA-F]{40}') | ForEach-Object { $_.Value }
   if ($existingVaults.Count -gt 0) {
     $vault = $existingVaults[-1]
-    $orderId = Invoke-CastRead @("call", $vault, "orderId()(bytes32)", "--rpc-url", $rpcUrl)
-    $expiryOutput = Invoke-CastRead @("call", $vault, "expiresAt()(uint64)", "--rpc-url", $rpcUrl)
+    $orderId = Invoke-CastRead -Arguments @("call", $vault, "orderId()(bytes32)", "--rpc-url", $rpcUrl)
+    $expiryOutput = Invoke-CastRead -Arguments @("call", $vault, "expiresAt()(uint64)", "--rpc-url", $rpcUrl)
     $expiresAt = [int64]([regex]::Match($expiryOutput, '^\d+').Value)
     if ($attemptExpiresAt -ge $expiresAt) { $attemptExpiresAt = $expiresAt - 60 }
     if ($quoteExpiresAt -ge $attemptExpiresAt) { $quoteExpiresAt = $attemptExpiresAt - 60 }
@@ -227,10 +231,10 @@ try {
   }
   else {
     $orderLabel = "SETTLELINK-PROOF-$now"
-    $orderId = Invoke-CastRead @("keccak", $orderLabel)
-    $invoiceMetadata = Invoke-CastRead @("keccak", "Direct Arc funding settlement proof")
+    $orderId = Invoke-CastRead -Arguments @("keccak", $orderLabel)
+    $invoiceMetadata = Invoke-CastRead -Arguments @("keccak", "Direct Arc funding settlement proof")
     $expiresAt = $now + 7200
-    $vault = Invoke-CastRead @(
+    $vault = Invoke-CastRead -Arguments @(
       "call", $factory, "predictPaymentVault(address,bytes32)(address)",
       $merchant, $orderId, "--rpc-url", $rpcUrl
     )
@@ -244,7 +248,7 @@ try {
   Write-Host "Invoice vault: $vault" -ForegroundColor Green
 
   # Give the separate customer enough Arc Testnet USDC for funding and gas.
-  $customerBalanceOutput = Invoke-CastRead @(
+  $customerBalanceOutput = Invoke-CastRead -Arguments @(
     "call", $usdc, "balanceOf(address)(uint256)", $customer, "--rpc-url", $rpcUrl
   )
   $customerBalance = [int64]([regex]::Match($customerBalanceOutput, '^\d+').Value)
@@ -327,16 +331,16 @@ try {
   $settlementHash = $settlement.transactionHash
   Write-Host "Settlement: $settlementHash" -ForegroundColor Green
 
-  $paymentState = Invoke-CastRead @(
+  $paymentState = Invoke-CastRead -Arguments @(
     "call", $vault, "paymentState()(uint8)", "--rpc-url", $rpcUrl
   )
   if ($paymentState -notmatch '^3') { throw "Vault did not enter Settled state: $paymentState" }
-  $vaultBalance = Invoke-CastRead @(
+  $vaultBalance = Invoke-CastRead -Arguments @(
     "call", $usdc, "balanceOf(address)(uint256)", $vault, "--rpc-url", $rpcUrl
   )
   if ($vaultBalance -notmatch '^0') { throw "Vault retained USDC after settlement: $vaultBalance" }
   try {
-    Invoke-CastRead @("call", $vault, "settle()", "--from", $customer, "--rpc-url", $rpcUrl) | Out-Null
+    Invoke-CastRead -Arguments @("call", $vault, "settle()", "--from", $customer, "--rpc-url", $rpcUrl) | Out-Null
     throw "Second settlement unexpectedly succeeded"
   }
   catch {
@@ -345,11 +349,11 @@ try {
   }
 
   $topics = @{
-    MerchantRegistered = Invoke-CastRead @("keccak", "MerchantRegistered(address,address,bytes32)")
-    PaymentIntentCreated = Invoke-CastRead @("keccak", "PaymentIntentCreated(bytes32,address,address,address,uint256,uint16,uint64,bytes32)")
-    PaymentAttemptRegistered = Invoke-CastRead @("keccak", "PaymentAttemptRegistered(bytes32,bytes32,address,address,uint256,uint256,uint256,uint256,uint64,uint64)")
-    Transfer = Invoke-CastRead @("keccak", "Transfer(address,address,uint256)")
-    PaymentSettled = Invoke-CastRead @("keccak", "PaymentSettled(bytes32,address,uint256,uint256,uint256,uint256)")
+    MerchantRegistered = Invoke-CastRead -Arguments @("keccak", "MerchantRegistered(address,address,bytes32)")
+    PaymentIntentCreated = Invoke-CastRead -Arguments @("keccak", "PaymentIntentCreated(bytes32,address,address,address,uint256,uint16,uint64,bytes32)")
+    PaymentAttemptRegistered = Invoke-CastRead -Arguments @("keccak", "PaymentAttemptRegistered(bytes32,bytes32,address,address,uint256,uint256,uint256,uint256,uint64,uint64)")
+    Transfer = Invoke-CastRead -Arguments @("keccak", "Transfer(address,address,uint256)")
+    PaymentSettled = Invoke-CastRead -Arguments @("keccak", "PaymentSettled(bytes32,address,uint256,uint256,uint256,uint256)")
   }
 
   Record-Evidence -Action "Merchant registration" -Hash $registerHash `
