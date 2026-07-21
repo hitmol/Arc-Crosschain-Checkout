@@ -64,6 +64,38 @@ function Invoke-CastRead([string[]]$Arguments) {
   return ($output -join [Environment]::NewLine).Trim()
 }
 
+function Get-ContractLogs([string]$Address, [int64]$FromBlock = 52933000) {
+  $raw = Invoke-CastRead @(
+    "logs", "--json", "--address", $Address,
+    "--from-block", "$FromBlock", "--to-block", "latest",
+    "--rpc-url", $rpcUrl
+  )
+  return @($raw | ConvertFrom-Json)
+}
+
+function Sign-TypedData {
+  param(
+    [string]$Account,
+    [string]$Password,
+    [string]$Json
+  )
+  $typedDataFile = [IO.Path]::GetTempFileName()
+  try {
+    [IO.File]::WriteAllText(
+      $typedDataFile,
+      $Json,
+      [Text.UTF8Encoding]::new($false)
+    )
+    return Invoke-CastWithPassword -Password $Password -Arguments @(
+      "wallet", "sign", "--data", "--from-file", $typedDataFile,
+      "--account", $Account
+    )
+  }
+  finally {
+    Remove-Item -LiteralPath $typedDataFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Send-Transaction {
   param(
     [string]$Account,
@@ -146,39 +178,87 @@ try {
   Write-Host "Customer: $customer"
   Write-Host "Treasury: $treasury"
 
-  $merchantMetadata = Invoke-CastRead @("keccak", "SettleLink public proof merchant")
-  $register = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
-    -To $registry -Signature "registerMerchant(address,bytes32)" `
-    -FunctionArguments @($merchant, $merchantMetadata)
-  $registerHash = $register.transactionHash
-  Write-Host "Merchant registration: $registerHash" -ForegroundColor Green
+  $merchantRecord = Invoke-CastRead @(
+    "call", $registry, "merchantOf(address)((address,address,bytes32,bool,uint64))",
+    $merchant, "--rpc-url", $rpcUrl
+  )
+  if ($merchantRecord -match [regex]::Escape($merchant)) {
+    $merchantTopic = "0x" + ("0" * 24) + $merchant.Substring(2).ToLowerInvariant()
+    $registerLog = Get-ContractLogs $registry | Where-Object {
+      $_.topics[1].ToLowerInvariant() -eq $merchantTopic
+    } | Select-Object -Last 1
+    if (-not $registerLog) { throw "Registered merchant transaction log was not found" }
+    $registerHash = $registerLog.transactionHash
+    Write-Host "Using existing merchant registration: $registerHash" -ForegroundColor Yellow
+  }
+  else {
+    $merchantMetadata = Invoke-CastRead @("keccak", "SettleLink public proof merchant")
+    $register = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
+      -To $registry -Signature "registerMerchant(address,bytes32)" `
+      -FunctionArguments @($merchant, $merchantMetadata)
+    $registerHash = $register.transactionHash
+    Write-Host "Merchant registration: $registerHash" -ForegroundColor Green
+  }
 
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  $orderLabel = "SETTLELINK-PROOF-$now"
-  $orderId = Invoke-CastRead @("keccak", $orderLabel)
-  $invoiceMetadata = Invoke-CastRead @("keccak", "Direct Arc funding settlement proof")
-  $expiresAt = $now + 7200
   $quoteExpiresAt = $now + 1800
   $attemptExpiresAt = $now + 3600
   $attemptId = Invoke-CastRead @("keccak", "SETTLELINK-ATTEMPT-$now-$customer")
-  $vault = Invoke-CastRead @(
-    "call", $factory, "predictPaymentVault(address,bytes32)(address)",
-    $merchant, $orderId, "--rpc-url", $rpcUrl
+  $vaultList = Invoke-CastRead @(
+    "call", $factory, "merchantVaults(address)(address[])",
+    $merchant, "--rpc-url", $rpcUrl
   )
-
-  $create = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
-    -To $factory `
-    -Signature "createPaymentIntent(bytes32,uint256,uint64,bytes32)" `
-    -FunctionArguments @($orderId, "$expectedAmount", "$expiresAt", $invoiceMetadata)
-  $createHash = $create.transactionHash
-  Write-Host "Invoice creation: $createHash"
+  $existingVaults = [regex]::Matches($vaultList, '0x[0-9a-fA-F]{40}') | ForEach-Object { $_.Value }
+  if ($existingVaults.Count -gt 0) {
+    $vault = $existingVaults[-1]
+    $orderId = Invoke-CastRead @("call", $vault, "orderId()(bytes32)", "--rpc-url", $rpcUrl)
+    $expiryOutput = Invoke-CastRead @("call", $vault, "expiresAt()(uint64)", "--rpc-url", $rpcUrl)
+    $expiresAt = [int64]([regex]::Match($expiryOutput, '^\d+').Value)
+    if ($attemptExpiresAt -ge $expiresAt) { $attemptExpiresAt = $expiresAt - 60 }
+    if ($quoteExpiresAt -ge $attemptExpiresAt) { $quoteExpiresAt = $attemptExpiresAt - 60 }
+    $vaultTopic = "0x" + ("0" * 24) + $vault.Substring(2).ToLowerInvariant()
+    $createLog = Get-ContractLogs $factory | Where-Object {
+      $_.topics[3].ToLowerInvariant() -eq $vaultTopic
+    } | Select-Object -Last 1
+    if (-not $createLog) { throw "Existing invoice creation log was not found" }
+    $createHash = $createLog.transactionHash
+    $orderLabel = "Existing verified order $orderId"
+    Write-Host "Using existing invoice creation: $createHash" -ForegroundColor Yellow
+  }
+  else {
+    $orderLabel = "SETTLELINK-PROOF-$now"
+    $orderId = Invoke-CastRead @("keccak", $orderLabel)
+    $invoiceMetadata = Invoke-CastRead @("keccak", "Direct Arc funding settlement proof")
+    $expiresAt = $now + 7200
+    $vault = Invoke-CastRead @(
+      "call", $factory, "predictPaymentVault(address,bytes32)(address)",
+      $merchant, $orderId, "--rpc-url", $rpcUrl
+    )
+    $create = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
+      -To $factory `
+      -Signature "createPaymentIntent(bytes32,uint256,uint64,bytes32)" `
+      -FunctionArguments @($orderId, "$expectedAmount", "$expiresAt", $invoiceMetadata)
+    $createHash = $create.transactionHash
+    Write-Host "Invoice creation: $createHash"
+  }
   Write-Host "Invoice vault: $vault" -ForegroundColor Green
 
   # Give the separate customer enough Arc Testnet USDC for funding and gas.
-  $customerFunding = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
-    -To $usdc -Signature "transfer(address,uint256)" `
-    -FunctionArguments @($customer, "2500000")
-  Write-Host "Customer wallet funding: $($customerFunding.transactionHash)"
+  $customerBalanceOutput = Invoke-CastRead @(
+    "call", $usdc, "balanceOf(address)(uint256)", $customer, "--rpc-url", $rpcUrl
+  )
+  $customerBalance = [int64]([regex]::Match($customerBalanceOutput, '^\d+').Value)
+  if ($customerBalance -ge 2000000) {
+    $customerFundingHash = "already-funded"
+    Write-Host "Customer wallet already has $customerBalance units; skipping funding." -ForegroundColor Yellow
+  }
+  else {
+    $customerFunding = Send-Transaction -Account $MerchantAccount -Password $merchantPassword `
+      -To $usdc -Signature "transfer(address,uint256)" `
+      -FunctionArguments @($customer, "2500000")
+    $customerFundingHash = $customerFunding.transactionHash
+    Write-Host "Customer wallet funding: $customerFundingHash"
+  }
 
   $typedData = @{
     types = @{
@@ -226,9 +306,7 @@ try {
     }
   } | ConvertTo-Json -Depth 8 -Compress
 
-  $signature = Invoke-CastWithPassword -Password $customerPassword -Arguments @(
-    "wallet", "sign", "--data", $typedData, "--account", $CustomerAccount
-  )
+  $signature = Sign-TypedData -Account $CustomerAccount -Password $customerPassword -Json $typedData
   if ($signature -notmatch '^0x[0-9a-fA-F]{130}$') { throw "Invalid EIP-712 signature output" }
   $authorization = "($attemptId,84532,$chainId,$vault,$orderId,$customer,$customer,$expectedAmount,$expectedAmount,$quoteExpiresAt,1,$attemptExpiresAt)"
   $attempt = Send-Transaction -Account $CustomerAccount -Password $customerPassword `
@@ -311,7 +389,7 @@ try {
     refundedExcess = "0.050000 USDC"
     merchantRegistrationTransaction = $registerHash
     invoiceCreationTransaction = $createHash
-    customerWalletFundingTransaction = $customerFunding.transactionHash
+    customerWalletFundingTransaction = $customerFundingHash
     paymentAttemptTransaction = $attemptHash
     vaultFundingTransaction = $fundingHash
     settlementTransaction = $settlementHash
