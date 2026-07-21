@@ -17,6 +17,13 @@ export const CONTRACT_NAMES = [
   "PaymentVaultImplementation",
   "CheckoutFactory",
 ];
+const BROADCAST_CONTRACT_NAMES = new Map([
+  ["MerchantRegistry", "MerchantRegistry"],
+  ["FeeManager", "FeeManager"],
+  ["PaymentVault", "PaymentVaultImplementation"],
+  ["PaymentVaultImplementation", "PaymentVaultImplementation"],
+  ["CheckoutFactory", "CheckoutFactory"],
+]);
 export const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -48,20 +55,39 @@ export function normalizeRpcUrl(value) {
 }
 
 export async function rpc(rpcUrl, method, params = []) {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok)
-    throw new Error(`${method} returned HTTP ${response.status}`);
-  const payload = await response.json();
-  if (payload.error)
-    throw new Error(
-      `${method} failed: ${payload.error.message ?? "RPC error"}`,
-    );
-  return payload.result;
+  const maximumAttempts = 5;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (
+      !response.ok &&
+      (response.status === 429 || response.status >= 500) &&
+      attempt < maximumAttempts
+    ) {
+      const retryAfter = Number.parseInt(
+        response.headers.get("retry-after") ?? "",
+        10,
+      );
+      const delay = Number.isSafeInteger(retryAfter)
+        ? Math.min(retryAfter * 1_000, 5_000)
+        : attempt * 500;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      continue;
+    }
+    if (!response.ok)
+      throw new Error(`${method} returned HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload.error)
+      throw new Error(
+        `${method} failed: ${payload.error.message ?? "RPC error"}`,
+      );
+    return payload.result;
+  }
+  throw new Error(`${method} exhausted RPC retry attempts`);
 }
 
 export async function assertArcNetwork(rpcUrl) {
@@ -135,18 +161,16 @@ export function parseBroadcast(broadcast, metadata = {}) {
     throw new Error("protocolFeeBps must be an integer from 0 through 500");
   const deployments = new Map();
   for (const transaction of broadcast.transactions ?? []) {
-    if (
-      transaction.transactionType === "CREATE" &&
-      CONTRACT_NAMES.includes(transaction.contractName)
-    ) {
-      deployments.set(transaction.contractName, {
+    const recordName = BROADCAST_CONTRACT_NAMES.get(transaction.contractName);
+    if (transaction.transactionType === "CREATE" && recordName) {
+      deployments.set(recordName, {
         address: assertAddress(
           transaction.contractAddress,
-          `${transaction.contractName} address`,
+          `${recordName} address`,
         ),
         transactionHash: assertHash(
           transaction.hash,
-          `${transaction.contractName} transaction`,
+          `${recordName} transaction`,
         ),
       });
     }

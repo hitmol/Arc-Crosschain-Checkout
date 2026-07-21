@@ -1,29 +1,31 @@
 {
   "network": "arc-testnet",
   "chainId": 5042002,
-  "status": "pending-credentials",
-  "deployer": null,
-  "treasury": null,
+  "status": "deployed",
+  "deployer": "0x4879a69d08dc2ffe9d63000b74bdeb5f22f2ecf7",
+  "treasury": "0x667a87b5bc9e461aa991055aa25e3d8674c42969",
   "usdc": "0x3600000000000000000000000000000000000000",
-  "protocolFeeBps": null,
-  "deploymentBlock": null,
+  "protocolFeeBps": 25,
+  "deploymentBlock": 52918699,
   "contracts": {
-    "MerchantRegistry": null,
-    "CheckoutFactory": null,
-    "PaymentVaultImplementation": null,
-    "FeeManager": null
+    "MerchantRegistry": "0x10d4611a4c434d990744bfd043bfacdb6d0edd08",
+    "FeeManager": "0x26b96dcb948288f1de15db321ffc0c034ecf7800",
+    "PaymentVaultImplementation": "0xd75c73b64485ba0432f6c2f4d0465de2abfa6e74",
+    "CheckoutFactory": "0x7d1d153bbb9f9e5ea8dbb83c295bf1fce0d2772e"
   },
   "deploymentTransactions": {
-    "MerchantRegistry": null,
-    "FeeManager": null,
-    "PaymentVaultImplementation": null,
-    "CheckoutFactory": null
+    "MerchantRegistry": "0xcb7e3553c62765c5ac55f98e1bb7e1c37083aee7440fa0398a3da7d266313d0e",
+    "FeeManager": "0xfa59d04b6f834ce042430d70f3114b205f8a62f03271d4ed2518f4e29e5d738f",
+    "PaymentVaultImplementation": "0x100711cb725e03fb589529f6a92a9c139f6ec64ffc735bce2af2a99e5bafac2b",
+    "CheckoutFactory": "0x590a60175a6ea942b9b9bb460612d16f89a3138522771ac588fb290699a181cc"
   },
-  "deployedAt": null,
-  "commit": null,
-  "tag": null,
+  "deployedAt": "2026-07-21T09:08:10.000Z",
+  "commit": "57103530b3ecafdd62b9df036feea86d0efb0ed9",
+  "tag": "v0.1.0-hackathon-rc3",
   "sourceVerification": {
     "status": "not-attempted",
     "checkedAt": null
-  }
+  },
+  "lastVerifiedAt": "2026-07-21T09:15:33.456Z",
+  "onchainVerification": "passed"
 }

@@ -6,6 +6,7 @@ import {
   assertAddress,
   normalizeRpcUrl,
   parseBroadcast,
+  rpc,
 } from "./deployment-common.mjs";
 
 const names = [
@@ -16,9 +17,10 @@ const names = [
 ];
 
 test("parses complete Foundry deployment evidence", () => {
-  const transactions = names.map((contractName, index) => ({
+  const transactions = names.map((recordName, index) => ({
     transactionType: "CREATE",
-    contractName,
+    contractName:
+      recordName === "PaymentVaultImplementation" ? "PaymentVault" : recordName,
     contractAddress: `0x${String(index + 1).padStart(40, "0")}`,
     hash: `0x${String(index + 1).padStart(64, "a")}`,
   }));
@@ -50,6 +52,10 @@ test("parses complete Foundry deployment evidence", () => {
     record.deploymentTransactions.MerchantRegistry,
     transactions[0].hash,
   );
+  assert.equal(
+    record.contracts.PaymentVaultImplementation,
+    transactions[2].contractAddress,
+  );
 });
 
 test("rejects incomplete broadcasts and unsafe configuration", () => {
@@ -67,4 +73,23 @@ test("rejects incomplete broadcasts and unsafe configuration", () => {
   );
   assert.throws(() => assertAddress(`0x${"0".repeat(40)}`, "owner"), /zero/);
   assert.throws(() => normalizeRpcUrl("file:///tmp/rpc"), /HTTP/);
+});
+
+test("retries transient RPC throttling", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) return new Response(null, { status: 429 });
+    return Response.json({ jsonrpc: "2.0", id: 1, result: "0x1" });
+  };
+  try {
+    assert.equal(
+      await rpc("https://rpc.testnet.arc.network", "eth_chainId"),
+      "0x1",
+    );
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
