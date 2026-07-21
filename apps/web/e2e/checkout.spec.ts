@@ -354,6 +354,7 @@ async function installOnchainMockWallet(
           if (method === "eth_chainId") return Promise.resolve(state.chainId);
           if (method === "wallet_switchEthereumChain") {
             state.chainId = (params?.[0] as { chainId: string }).chainId;
+            window.localStorage.setItem("mock.switchAttempted", state.chainId);
             for (const listener of listeners.get("chainChanged") ?? [])
               listener(state.chainId);
             return Promise.resolve(null);
@@ -394,6 +395,12 @@ async function installOnchainMockWallet(
       Object.defineProperty(window, "ethereum", {
         configurable: false,
         value: ethereum,
+      });
+      Object.defineProperty(window, "__settlelinkSetMockChainId", {
+        configurable: false,
+        value: (chainId: string) => {
+          state.chainId = chainId;
+        },
       });
     },
     {
@@ -677,8 +684,19 @@ test("creates and recovers a verified onchain invoice", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Register as a merchant" }),
   ).toBeVisible();
+  await page.evaluate(() => {
+    const controls = window as unknown as {
+      __settlelinkSetMockChainId: (chainId: string) => void;
+    };
+    controls.__settlelinkSetMockChainId("0x1");
+  });
   await page.getByLabel("Business label (optional)").fill("E2E Merchant");
   await page.getByRole("button", { name: "Register as a merchant" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("mock.switchAttempted")),
+    )
+    .toBe("0x4cef52");
   await expect(page.getByRole("alert").getByText(/rejected/i)).toBeVisible();
   await page.getByRole("button", { name: "Register as a merchant" }).click();
   await expect(page.getByText("Active", { exact: true })).toBeVisible();

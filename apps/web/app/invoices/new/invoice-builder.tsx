@@ -19,7 +19,6 @@ import {
   useAccount,
   useChainId,
   usePublicClient,
-  useSwitchChain,
   useWriteContract,
 } from "wagmi";
 import { ExternalLink, LoaderCircle } from "lucide-react";
@@ -80,8 +79,8 @@ export function InvoiceBuilder() {
   const account = useAccount();
   const chainId = useChainId();
   const publicClient = usePublicClient({ chainId: arcTestnet.id });
-  const { switchChainAsync, isPending: switching } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const [switching, setSwitching] = useState(false);
   const [merchant, setMerchant] = useState<MerchantRecord | null>(null);
   const [merchantLoading, setMerchantLoading] = useState(false);
   const [payout, setPayout] = useState("");
@@ -142,16 +141,74 @@ export function InvoiceBuilder() {
       void recoverPendingInvoices(publicClient, window.localStorage);
   }, [publicClient, refreshMerchant]);
 
+  async function requireArcWalletChain() {
+    const connector = account.connector;
+    if (!connector) throw new Error("Reconnect the wallet before continuing");
+    const provider = (await connector.getProvider()) as {
+      request(args: {
+        method: string;
+        params?: readonly unknown[];
+      }): Promise<unknown>;
+    };
+    const readProviderChainId = async () => {
+      const value = await provider.request({ method: "eth_chainId" });
+      const parsed =
+        typeof value === "string" ? Number.parseInt(value, 16) : Number(value);
+      if (!Number.isSafeInteger(parsed) || parsed <= 0)
+        throw new Error("The wallet returned an invalid chain ID");
+      return parsed;
+    };
+    let walletChainId = await readProviderChainId();
+    if (walletChainId !== arcTestnet.id) {
+      const chainIdHex = `0x${arcTestnet.id.toString(16)}`;
+      try {
+        await provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: chainIdHex }],
+        });
+      } catch (caught) {
+        const code =
+          typeof caught === "object" && caught
+            ? (caught as { code?: unknown }).code
+            : undefined;
+        if (code !== 4902 && code !== "4902") throw caught;
+        await provider.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: chainIdHex,
+              chainName: arcTestnet.name,
+              nativeCurrency: arcTestnet.nativeCurrency,
+              rpcUrls: [...arcTestnet.rpcUrls.default.http],
+              blockExplorerUrls: arcTestnet.blockExplorers?.default.url
+                ? [arcTestnet.blockExplorers.default.url]
+                : [],
+            },
+          ],
+        });
+      }
+      walletChainId = await readProviderChainId();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    if (walletChainId !== arcTestnet.id)
+      throw new Error(
+        `The wallet is still on chain ${walletChainId}. Switch it to Arc Testnet ${arcTestnet.id}.`,
+      );
+  }
+
   async function switchToArc(): Promise<boolean> {
     setError("");
+    setSwitching(true);
     try {
-      await switchChainAsync({ chainId: arcTestnet.id });
+      await requireArcWalletChain();
       return true;
     } catch (caught) {
       setError(
         `${friendlyContractError(caught)} If Arc is not listed, approve the wallet's add-network request.`,
       );
       return false;
+    } finally {
+      setSwitching(false);
     }
   }
 
@@ -159,7 +216,7 @@ export function InvoiceBuilder() {
     if (!publicClient || !connectedAddress) return;
     setError("");
     try {
-      if (chainId !== arcTestnet.id && !(await switchToArc())) return;
+      await requireArcWalletChain();
       const current = await readMerchant(publicClient, connectedAddress);
       if (current.owner !== zeroAddress) {
         setMerchant(current);
@@ -242,10 +299,7 @@ export function InvoiceBuilder() {
     setPrepared(null);
     setLifecycle("preparing");
     try {
-      if (chainId !== arcTestnet.id)
-        throw new Error(
-          "Switch to Arc Testnet before preparing the transaction",
-        );
+      await requireArcWalletChain();
       await verifyOnchainDeployment(publicClient);
       const currentMerchant = await readMerchant(
         publicClient,
@@ -312,8 +366,7 @@ export function InvoiceBuilder() {
     if (!publicClient || !connectedAddress || !prepared) return;
     setError("");
     try {
-      if (chainId !== arcTestnet.id)
-        throw new Error("Wallet is no longer on Arc Testnet");
+      await requireArcWalletChain();
       await verifyOnchainDeployment(publicClient);
       setLifecycle("awaiting-wallet");
       const hash = await writeContractAsync({
