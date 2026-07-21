@@ -14,6 +14,7 @@ import {
   decodeCreatedInvoice,
   formatInvoiceAmount,
   friendlyContractError,
+  isUnknownWalletChainError,
   readLocalInvoices,
   upsertLocalInvoice,
   validateInvoiceInput,
@@ -202,5 +203,21 @@ describe("invoice receipt verification and persistence", () => {
         message: "Wallet provider could not prepare the transaction",
       }),
     ).toBe("Wallet provider could not prepare the transaction");
+  });
+
+  it("recognizes unknown-chain errors wrapped by browser wallet providers", () => {
+    const wrapped = {
+      code: -32603,
+      message: "Internal JSON-RPC error.",
+      data: {
+        originalError: {
+          code: 4902,
+          message:
+            'Unrecognized chain ID "0x4cef52". Try adding the chain first.',
+        },
+      },
+    };
+    expect(isUnknownWalletChainError(wrapped)).toBe(true);
+    expect(isUnknownWalletChainError({ code: 4001 })).toBe(false);
   });
 });

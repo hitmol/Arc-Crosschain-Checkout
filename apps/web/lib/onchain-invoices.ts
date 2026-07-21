@@ -212,6 +212,33 @@ function isWalletRejection(error: unknown, depth = 0): boolean {
   return isWalletRejection(record.cause, depth + 1);
 }
 
+export function isUnknownWalletChainError(error: unknown, depth = 0): boolean {
+  if (depth > 8 || (typeof error !== "object" && typeof error !== "string"))
+    return false;
+  if (typeof error === "string")
+    return /unrecognized chain id|unknown chain|chain (?:has )?not been added/i.test(
+      error,
+    );
+  if (!error) return false;
+  const record = error as Record<string, unknown>;
+  if (record.code === 4902 || record.code === "4902") return true;
+  for (const key of ["message", "shortMessage", "details"] as const) {
+    if (
+      typeof record[key] === "string" &&
+      /unrecognized chain id|unknown chain|chain (?:has )?not been added/i.test(
+        record[key],
+      )
+    )
+      return true;
+  }
+  for (const key of ["cause", "data", "error", "originalError"] as const) {
+    if (record[key] && record[key] !== error) {
+      if (isUnknownWalletChainError(record[key], depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
 export function friendlyContractError(error: unknown): string {
   if (isWalletRejection(error))
     return "The wallet request was rejected. You can safely try again.";

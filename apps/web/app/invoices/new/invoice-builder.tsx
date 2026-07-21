@@ -28,6 +28,7 @@ import {
   assertOrderIdAvailable,
   friendlyContractError,
   invoicePath,
+  isUnknownWalletChainError,
   upsertLocalInvoice,
   validateInvoiceInput,
   validatePayoutAddress,
@@ -164,11 +165,7 @@ export function InvoiceBuilder() {
           params: [{ chainId: chainIdHex }],
         });
       } catch (caught) {
-        const code =
-          typeof caught === "object" && caught
-            ? (caught as { code?: unknown }).code
-            : undefined;
-        if (code !== 4902 && code !== "4902") throw caught;
+        if (!isUnknownWalletChainError(caught)) throw caught;
         await provider.request({
           method: "wallet_addEthereumChain",
           params: [
@@ -176,12 +173,16 @@ export function InvoiceBuilder() {
               chainId: chainIdHex,
               chainName: arcTestnet.name,
               nativeCurrency: arcTestnet.nativeCurrency,
-              rpcUrls: [...arcTestnet.rpcUrls.default.http],
+              rpcUrls: [arcTestnet.rpcUrls.default.http[0]],
               blockExplorerUrls: arcTestnet.blockExplorers?.default.url
                 ? [arcTestnet.blockExplorers.default.url]
                 : [],
             },
           ],
+        });
+        await provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: chainIdHex }],
         });
       }
       walletChainId = await readProviderChainId();

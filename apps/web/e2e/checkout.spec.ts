@@ -69,6 +69,7 @@ async function installOnchainMockWallet(
     initialRegistered?: boolean;
     rejectFirstTransaction?: boolean;
     initialChainId?: string;
+    arcInitiallyUnknown?: boolean;
   } = {},
 ) {
   await page.addInitScript(
@@ -78,6 +79,7 @@ async function installOnchainMockWallet(
       initialRegistered,
       rejectFirstTransaction,
       initialChainId,
+      arcInitiallyUnknown,
     }) => {
       const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
       const zeroAddress = `0x${"0".repeat(40)}`;
@@ -87,6 +89,7 @@ async function installOnchainMockWallet(
         registered: boolean;
         rejectTransaction: boolean;
         chainId: string;
+        arcKnown: boolean;
         invoice: null | {
           orderId: string;
           amount: string;
@@ -97,6 +100,7 @@ async function installOnchainMockWallet(
         registered: initialRegistered,
         rejectTransaction: rejectFirstTransaction,
         chainId: initialChainId,
+        arcKnown: !arcInitiallyUnknown,
         invoice: null,
       };
       const stripHex = (value: string) => value.replace(/^0x/, "");
@@ -353,10 +357,39 @@ async function installOnchainMockWallet(
           }
           if (method === "eth_chainId") return Promise.resolve(state.chainId);
           if (method === "wallet_switchEthereumChain") {
-            state.chainId = (params?.[0] as { chainId: string }).chainId;
+            const requestedChainId = (params?.[0] as { chainId: string })
+              .chainId;
+            if (requestedChainId === "0x4cef52" && !state.arcKnown) {
+              return Promise.reject(
+                Object.assign(new Error("Internal JSON-RPC error."), {
+                  code: -32603,
+                  data: {
+                    originalError: Object.assign(
+                      new Error(
+                        'Unrecognized chain ID "0x4cef52". Try adding the chain first.',
+                      ),
+                      { code: 4902 },
+                    ),
+                  },
+                }),
+              );
+            }
+            state.chainId = requestedChainId;
             window.localStorage.setItem("mock.switchAttempted", state.chainId);
             for (const listener of listeners.get("chainChanged") ?? [])
               listener(state.chainId);
+            return Promise.resolve(null);
+          }
+          if (method === "wallet_addEthereumChain") {
+            const chain = params?.[0] as {
+              chainId: string;
+              rpcUrls: string[];
+            };
+            state.arcKnown = chain.chainId === "0x4cef52";
+            window.localStorage.setItem(
+              "mock.addedChain",
+              JSON.stringify(chain),
+            );
             return Promise.resolve(null);
           }
           if (method === "eth_sendTransaction") {
@@ -413,6 +446,7 @@ async function installOnchainMockWallet(
       rejectFirstTransaction: options.rejectFirstTransaction ?? false,
       initialChainId: options.initialChainId ?? "0x4cef52",
       initialRegistered: options.initialRegistered ?? false,
+      arcInitiallyUnknown: options.arcInitiallyUnknown ?? false,
     },
   );
 }
@@ -669,6 +703,7 @@ test("creates and recovers a verified onchain invoice", async ({ page }) => {
   await installOnchainMockWallet(page, {
     initialRegistered: false,
     rejectFirstTransaction: true,
+    arcInitiallyUnknown: true,
   });
   const unexpectedApiRequests: string[] = [];
   page.on("request", (request) => {
@@ -692,6 +727,17 @@ test("creates and recovers a verified onchain invoice", async ({ page }) => {
   });
   await page.getByLabel("Business label (optional)").fill("E2E Merchant");
   await page.getByRole("button", { name: "Register as a merchant" }).click();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("mock.addedChain")))
+    .not.toBeNull();
+  const addedChainJson = await page.evaluate(() =>
+    localStorage.getItem("mock.addedChain"),
+  );
+  const addedChain: unknown = JSON.parse(addedChainJson ?? "null");
+  expect(addedChain).toMatchObject({
+    chainId: "0x4cef52",
+    rpcUrls: ["https://rpc.testnet.arc.network"],
+  });
   await expect
     .poll(() =>
       page.evaluate(() => localStorage.getItem("mock.switchAttempted")),
