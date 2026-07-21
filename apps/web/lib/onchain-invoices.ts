@@ -241,5 +241,14 @@ export function friendlyContractError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    for (const key of ["shortMessage", "message", "details"] as const) {
+      if (typeof record[key] === "string" && record[key].trim())
+        return record[key].trim().slice(0, 500);
+    }
+    if (record.cause && record.cause !== error)
+      return friendlyContractError(record.cause);
+  }
   return "The transaction could not be prepared. Please try again.";
 }

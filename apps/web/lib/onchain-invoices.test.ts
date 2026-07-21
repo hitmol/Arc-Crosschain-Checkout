@@ -194,4 +194,13 @@ describe("invoice receipt verification and persistence", () => {
       "The wallet request was rejected. You can safely try again.",
     );
   });
+
+  it("preserves actionable messages from EIP-1193 provider objects", () => {
+    expect(
+      friendlyContractError({
+        code: -32603,
+        message: "Wallet provider could not prepare the transaction",
+      }),
+    ).toBe("Wallet provider could not prepare the transaction");
+  });
 });

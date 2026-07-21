@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  createWalletClient,
+  custom,
   decodeEventLog,
   getAddress,
   isAddressEqual,
@@ -12,15 +14,11 @@ import {
   zeroAddress,
   zeroHash,
   type Address,
+  type EIP1193Provider,
   type Hash,
 } from "viem";
 import { arcTestnet } from "viem/chains";
-import {
-  useAccount,
-  useChainId,
-  usePublicClient,
-  useWriteContract,
-} from "wagmi";
+import { useAccount, useChainId, usePublicClient } from "wagmi";
 import { ExternalLink, LoaderCircle } from "lucide-react";
 import { WalletButton } from "@/components/wallet-button";
 import { CopyButton } from "@/components/copy-button";
@@ -79,7 +77,6 @@ export function InvoiceBuilder() {
   const account = useAccount();
   const chainId = useChainId();
   const publicClient = usePublicClient({ chainId: arcTestnet.id });
-  const { writeContractAsync } = useWriteContract();
   const [switching, setSwitching] = useState(false);
   const [merchant, setMerchant] = useState<MerchantRecord | null>(null);
   const [merchantLoading, setMerchantLoading] = useState(false);
@@ -196,6 +193,18 @@ export function InvoiceBuilder() {
       );
   }
 
+  async function activeWalletClient() {
+    const connector = account.connector;
+    if (!connector || !connectedAddress)
+      throw new Error("Reconnect the wallet before continuing");
+    const provider = (await connector.getProvider()) as EIP1193Provider;
+    return createWalletClient({
+      account: connectedAddress,
+      chain: arcTestnet,
+      transport: custom(provider),
+    });
+  }
+
   async function switchToArc(): Promise<boolean> {
     setError("");
     setSwitching(true);
@@ -245,13 +254,13 @@ export function InvoiceBuilder() {
         args: [payoutAddress, metadataHash],
       });
       setLifecycle("awaiting-wallet");
-      const hash = await writeContractAsync({
+      const walletClient = await activeWalletClient();
+      const hash = await walletClient.writeContract({
         account: connectedAddress,
         address: registryAddress,
         abi: merchantRegistryAbi,
         functionName: "registerMerchant",
         args: [payoutAddress, metadataHash],
-        chainId: arcTestnet.id,
       });
       setTransactionHash(hash);
       setLifecycle("confirming");
@@ -369,7 +378,8 @@ export function InvoiceBuilder() {
       await requireArcWalletChain();
       await verifyOnchainDeployment(publicClient);
       setLifecycle("awaiting-wallet");
-      const hash = await writeContractAsync({
+      const walletClient = await activeWalletClient();
+      const hash = await walletClient.writeContract({
         account: connectedAddress,
         address: factoryAddress,
         abi: checkoutFactoryAbi,
@@ -380,7 +390,6 @@ export function InvoiceBuilder() {
           BigInt(prepared.expiresAt),
           prepared.metadataHash,
         ],
-        chainId: arcTestnet.id,
       });
       setTransactionHash(hash);
       setLifecycle("submitted");
