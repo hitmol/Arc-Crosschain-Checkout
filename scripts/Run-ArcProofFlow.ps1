@@ -36,19 +36,24 @@ function Invoke-CastWithPassword {
     [Parameter(Mandatory)] [string]$Password,
     [Parameter(Mandatory)] [string[]]$Arguments
   )
-  $previousPassword = $env:ETH_PASSWORD
+  $passwordFile = [IO.Path]::GetTempFileName()
   try {
-    $env:ETH_PASSWORD = $Password
-    $output = & $cast @Arguments 2>&1
+    [IO.File]::WriteAllText(
+      $passwordFile,
+      $Password,
+      [Text.UTF8Encoding]::new($false)
+    )
+    $output = & $cast @Arguments --password-file $passwordFile 2>&1
     if ($LASTEXITCODE -ne 0) { throw ($output -join [Environment]::NewLine) }
     return ($output -join [Environment]::NewLine).Trim()
   }
   finally {
-    if ($null -eq $previousPassword) {
-      Remove-Item Env:ETH_PASSWORD -ErrorAction SilentlyContinue
-    }
-    else {
-      $env:ETH_PASSWORD = $previousPassword
+    if (Test-Path -LiteralPath $passwordFile) {
+      $length = (Get-Item -LiteralPath $passwordFile).Length
+      if ($length -gt 0) {
+        [IO.File]::WriteAllBytes($passwordFile, [byte[]]::new($length))
+      }
+      Remove-Item -LiteralPath $passwordFile -Force
     }
   }
 }
@@ -319,6 +324,4 @@ try {
 finally {
   $merchantPassword = $null
   $customerPassword = $null
-  Remove-Item Env:ETH_PASSWORD -ErrorAction SilentlyContinue
 }
-
