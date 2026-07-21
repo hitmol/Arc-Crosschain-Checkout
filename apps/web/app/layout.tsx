@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
+import { connection } from "next/server";
 import { BrandMark } from "@/components/brand-mark";
 import { Header } from "@/components/header";
 import { Providers } from "@/components/providers";
@@ -32,9 +33,13 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // Nonce-based CSP requires request-time rendering so Next.js can attach the
+  // per-request nonce from proxy.ts to every framework and application script.
+  await connection();
+
   return (
     <html lang="en" data-scroll-behavior="smooth">
       <body className={`${manrope.variable} ${space.variable}`}>

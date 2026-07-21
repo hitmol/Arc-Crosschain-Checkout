@@ -16,6 +16,7 @@
     "test": "turbo test",
     "test:contracts": "pnpm --filter @arc-checkout/contracts test",
     "test:e2e": "pnpm --filter @arc-checkout/web test:e2e",
+    "test:e2e:production": "pnpm --filter @arc-checkout/web test:e2e:production",
     "deploy:contracts": "node scripts/deploy-contracts.mjs",
     "deploy:preflight": "node scripts/deploy-contracts.mjs --preflight",
     "verify:deployment": "node scripts/verify-deployment.mjs",
