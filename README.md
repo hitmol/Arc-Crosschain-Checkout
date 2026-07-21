@@ -10,7 +10,7 @@ A merchant creates an invoice, a deterministic settlement vault exists on Arc, t
 
 ## Current verified status
 
-- The public frontend is available in read-only builder preview mode.
+- The public builder preview supports real Arc Testnet merchant registration and invoice creation without requiring the production backend.
 - Four project-owned contracts are deployed on Arc Testnet (chain ID `5042002`).
 - Contract source is verified on ArcScan and the recorded configuration passes independent RPC verification.
 - Deployment transactions and block `52918699` are recorded in [`deployments/arc-testnet.json`](deployments/arc-testnet.json).
@@ -19,7 +19,7 @@ A merchant creates an invoice, a deterministic settlement vault exists on Arc, t
 - Automated Foundry, Vitest, and Playwright suites run in CI.
 - The software is testnet-only and has not received an external smart-contract audit.
 
-The public frontend intentionally disables backend-dependent merchant features until a production API and worker are enabled. It never falls back to a localhost API in production.
+The public frontend keeps onchain merchant registration, invoice creation, receipt verification, and browser-local invoice history available while backend-dependent accounts, webhooks, and reconciliation remain disabled. It never falls back to a localhost API in production.
 
 ## Live links
 
@@ -54,7 +54,7 @@ The invoice vault is the onchain source of truth for expected amount, payout, re
 
 ### Verified now
 
-- public repository and read-only frontend;
+- public repository and onchain builder frontend;
 - four deployed, source-verified Arc contracts;
 - RPC-verified deployment configuration;
 - wallet chooser implementation;
@@ -99,6 +99,7 @@ pnpm test:contracts
 pnpm --filter @arc-checkout/contracts coverage
 pnpm test:e2e
 pnpm build
+pnpm --filter @arc-checkout/web test:e2e:onchain
 pnpm security:scan
 pnpm audit --audit-level high
 ```
@@ -107,6 +108,6 @@ See [`docs/LOCAL_DEVELOPMENT.md`](docs/LOCAL_DEVELOPMENT.md), [`docs/DEPLOYMENT.
 
 ## Limitations and safety
 
-SettleLink is testnet software, is not externally audited, and is not endorsed by Arc or Circle. Automatic crosschain refunds remain a recovery workflow rather than a universal atomic guarantee. Full public CCTP transaction evidence is still pending; the recorded Arc-native funding evidence proves vault settlement but must not be interpreted as a completed crosschain checkout.
+SettleLink is testnet software, is not externally audited, and is not endorsed by Arc or Circle. Browser-local invoice history is limited to invoices created in that browser and is not a complete merchant database. Automatic crosschain refunds remain a recovery workflow rather than a universal atomic guarantee. Full public CCTP transaction evidence is still pending; direct Arc funding proves vault settlement but must not be interpreted as a completed CCTP checkout.
 
 Read [`SECURITY.md`](SECURITY.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), and [`docs/BRAND_COMPLIANCE.md`](docs/BRAND_COMPLIANCE.md) before using or evaluating the code.

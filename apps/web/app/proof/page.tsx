@@ -16,6 +16,7 @@ import {
   interactionEvidence,
   projectContracts,
   proofTestInventory,
+  verifiedExampleInvoice,
 } from "@/lib/deployment";
 
 export const metadata: Metadata = {
@@ -86,7 +87,7 @@ export default function ProofPage() {
             <strong>{compact(arcDeployment.deployer)}</strong>
             <CopyButton
               value={arcDeployment.deployer}
-              label="Copy deployer address"
+              label="Deployer address"
             />
           </div>
           <div>
@@ -94,7 +95,7 @@ export default function ProofPage() {
             <strong>{compact(arcDeployment.treasury)}</strong>
             <CopyButton
               value={arcDeployment.treasury}
-              label="Copy treasury address"
+              label="Treasury address"
             />
           </div>
           <div>
@@ -110,10 +111,6 @@ export default function ProofPage() {
           <div>
             <span>Builder release</span>
             <strong>{PUBLIC_RELEASE_TAG}</strong>
-          </div>
-          <div>
-            <span>Deployment provenance tag</span>
-            <strong>{arcDeployment.tag} (deployment provenance)</strong>
           </div>
           <div>
             <span>Source verification</span>
@@ -153,7 +150,7 @@ export default function ProofPage() {
               <div className="contract-actions">
                 <CopyButton
                   value={contract.address}
-                  label={`Copy ${contract.name} address`}
+                  label={`${contract.name} address`}
                 />
                 <a href={contract.addressUrl} target="_blank" rel="noreferrer">
                   Contract <ExternalLink size={13} />
@@ -253,6 +250,80 @@ export default function ProofPage() {
           InvalidState(), confirming replay protection.
         </p>
         <Link href="/docs#evidence">How evidence is verified</Link>
+      </section>
+
+      <section
+        className="proof-section"
+        aria-labelledby="example-invoice-heading"
+      >
+        <div className="section-kicker">VERIFIED EXAMPLE INVOICE</div>
+        <h2 id="example-invoice-heading">Real Arc settlement lifecycle</h2>
+        <div className="proof-facts">
+          <div>
+            <span>Order ID</span>
+            <strong>{verifiedExampleInvoice.orderId}</strong>
+          </div>
+          <div>
+            <span>Merchant</span>
+            <strong>{compact(verifiedExampleInvoice.merchant)}</strong>
+          </div>
+          <div>
+            <span>Payer</span>
+            <strong>{compact(verifiedExampleInvoice.payer)}</strong>
+          </div>
+          <div>
+            <span>Invoice vault</span>
+            <a
+              href={verifiedExampleInvoice.vaultUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {compact(verifiedExampleInvoice.vault)} <ExternalLink size={13} />
+            </a>
+            <CopyButton
+              label="Invoice vault address"
+              value={verifiedExampleInvoice.vault}
+            />
+          </div>
+          <div>
+            <span>Expected amount</span>
+            <strong>{verifiedExampleInvoice.expectedAmount}</strong>
+          </div>
+          <div>
+            <span>Funded amount</span>
+            <strong>{verifiedExampleInvoice.fundedAmount}</strong>
+          </div>
+          <div>
+            <span>Merchant payout</span>
+            <strong>{verifiedExampleInvoice.merchantAmount}</strong>
+          </div>
+          <div>
+            <span>Protocol fee</span>
+            <strong>{verifiedExampleInvoice.protocolFee}</strong>
+          </div>
+          <div>
+            <span>Excess refund</span>
+            <strong>{verifiedExampleInvoice.refundExcess}</strong>
+          </div>
+          <div>
+            <span>Final state</span>
+            <strong className="proof-ok">
+              {verifiedExampleInvoice.finalState}
+            </strong>
+          </div>
+          {[
+            ["Creation transaction", verifiedExampleInvoice.creationUrl],
+            ["Funding transaction", verifiedExampleInvoice.fundingUrl],
+            ["Settlement transaction", verifiedExampleInvoice.settlementUrl],
+          ].map(([label, url]) => (
+            <div key={label}>
+              <span>{label}</span>
+              <a href={url} target="_blank" rel="noreferrer">
+                Open ArcScan <ExternalLink size={13} />
+              </a>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section

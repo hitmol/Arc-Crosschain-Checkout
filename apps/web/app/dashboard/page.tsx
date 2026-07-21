@@ -1,9 +1,11 @@
 import { DashboardClient } from "./dashboard-client";
-import { ReadOnlyNotice } from "@/components/read-only-notice";
-import { PUBLIC_READ_ONLY_MODE } from "@/lib/api";
+import { PublicBuilderConsole } from "./public-builder-console";
+import { publicCapabilities } from "@/lib/capabilities";
 
 export default function DashboardPage() {
-  if (PUBLIC_READ_ONLY_MODE)
-    return <ReadOnlyNotice feature="The live merchant dashboard" />;
-  return <DashboardClient />;
+  return publicCapabilities.backendEnabled ? (
+    <DashboardClient />
+  ) : (
+    <PublicBuilderConsole />
+  );
 }

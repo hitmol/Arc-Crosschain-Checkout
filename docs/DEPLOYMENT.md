@@ -29,9 +29,11 @@ ARC_RPC_URL=https://rpc.testnet.arc.network pnpm verify:deployment
 
 The verifier rejects a wrong chain, missing or reverted deployment receipts, absent bytecode, wrong owners, wrong treasury/fee, or mismatched factory relationships.
 
-## Completed: public frontend mode
+## Public frontend modes
 
-The Vercel frontend is designed to run as a stable public read-only builder preview when `NEXT_PUBLIC_API_URL` is absent. `/proof` reads the verified deployment and evidence records at build time. Backend-dependent routes clearly disclose that the merchant backend is unavailable.
+When `NEXT_PUBLIC_API_URL` is absent, the Vercel frontend keeps public onchain builder capabilities enabled: wallet connection, Arc network switching, MerchantRegistry reads/writes, CheckoutFactory invoice creation, receipt decoding, deterministic invoice routes, and browser-local recovery. `/proof` reads the verified deployment and evidence records at build time.
+
+Backend merchant sessions, database history, webhooks, and reconciliation are enabled separately only when a validated HTTPS production API URL exists. The absence of that URL must never disable onchain invoice creation.
 
 Production never silently falls back to `http://localhost:4000`. A configured production API must use HTTPS and must not target localhost.
 

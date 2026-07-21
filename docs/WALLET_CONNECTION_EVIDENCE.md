@@ -15,7 +15,8 @@ This record distinguishes deterministic automated coverage from real external-wa
 | EIP-6963 deduplication                                 | Passed                        | Unit test; not yet exercised with two real extensions                                               |
 | Production dependency audit                            | High issues resolved          | `ws` is forced to patched `8.21.1`; one upstream Circle/ethers `elliptic` low advisory remains      |
 | Vercel contract configuration                          | Configured                    | Production/preview/development factory and registry variables use the verified Arc deployment       |
-| Public read-only proof mode                            | Passed in code                | Missing API disables backend routes; production preflight rejects a localhost API                   |
+| Public onchain builder without API                     | Passed in deterministic E2E   | Invoice create/reject/retry/receipt/reload flow uses no backend request; localhost API is rejected  |
+| Onchain invoice recovery after reload                  | Passed in deterministic E2E   | Confirmed receipt/event data is restored from versioned browser history and verified contract reads |
 | Stable production URL                                  | Passed                        | `https://arc-crosschain-checkout.vercel.app`                                                        |
 | Anonymous deployed-browser check                       | Passed                        | Homepage, `/proof`, and dashboard checked on 2026-07-21; no console errors                          |
 | Real WalletConnect QR modal                            | Not tested                    | Requires a valid project ID and allowlisted deployed origin                                         |

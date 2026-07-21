@@ -3,8 +3,9 @@
 ## Current testnet preview
 
 - SettleLink is Arc Testnet software and has not been externally audited.
-- The public frontend is a read-only builder preview while the production API and worker are disabled.
-- Backend-dependent merchant onboarding, invoice creation, dashboard, checkout, and receipt pages disclose that limitation instead of using mock production data.
+- The public frontend provides onchain-only Arc merchant registration and invoice creation while the production API and worker are disabled.
+- Browser invoice history contains only public records created in that browser. It is not a complete merchant account history and can be cleared with site data.
+- Backend sessions, API keys, webhooks, delivery logs, and database-backed reconciliation remain unavailable in the public preview.
 - WalletConnect QR requires a valid WalletConnect project ID and exact production-origin allowlisting; manual evidence must not be marked complete until tested.
 - Browser wallet availability depends on the reviewer having an injected provider such as MetaMask or Rabby.
 

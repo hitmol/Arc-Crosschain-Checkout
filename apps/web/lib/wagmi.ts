@@ -35,6 +35,7 @@ if (walletPublicConfig.issues.length > 0) {
 
 export const wagmiConfig = createConfig({
   chains: [arcTestnet, baseSepolia, sepolia],
+  batch: { multicall: false },
   connectors,
   multiInjectedProviderDiscovery: true,
   transports: {

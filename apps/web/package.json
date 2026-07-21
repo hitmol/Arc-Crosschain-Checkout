@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "node node_modules/@playwright/test/cli.js test",
+    "test:e2e:onchain": "node node_modules/@playwright/test/cli.js test --config playwright.onchain.config.ts --grep \"creates and recovers a verified onchain invoice\"",
     "test:e2e:production": "node node_modules/@playwright/test/cli.js test --config playwright.production.config.ts"
   },
   "dependencies": {

@@ -32,6 +32,8 @@ This file is generated from the verified deployment record and successful receip
 
 Direct Arc Testnet funding, when present, verifies invoice settlement. It is not crosschain CCTP evidence.
 
+The public builder stores pending invoice transaction hashes immediately and accepts a vault only after the confirmed `PaymentIntentCreated` event matches the merchant, order ID, amount, expiry, and contract-predicted vault. Deterministic browser tests cover rejection recovery and reload recovery; they are not listed as real transactions in this evidence table.
+
 ## Crosschain evidence
 
 Expected correlation fields are source approval, CCTP burn, Circle message hash/attestation, Arc forwarding mint, and Arc settlement.

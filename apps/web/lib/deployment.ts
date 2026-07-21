@@ -61,6 +61,10 @@ const evidenceSchema = z.object({
   payout: address.optional(),
   protocolFee: z.string().min(1).optional(),
   refundExcess: z.string().min(1).optional(),
+  orderId: hash.optional(),
+  payer: address.optional(),
+  merchantAmount: z.string().min(1).optional(),
+  finalState: z.string().min(1).optional(),
 });
 
 export const parseDeploymentRecord = (value: unknown) =>
@@ -126,6 +130,48 @@ export const interactionEvidence = interactionDefinitions.map((definition) => ({
     entry.action.toLowerCase().includes(definition.match),
   ),
 }));
+
+const exampleCreation = verifiedEvidence.find((entry) =>
+  entry.action.toLowerCase().includes("invoice creation"),
+);
+const exampleAttempt = verifiedEvidence.find((entry) =>
+  entry.action.toLowerCase().includes("payment attempt registration"),
+);
+const exampleFunding = verifiedEvidence.find((entry) =>
+  entry.action.toLowerCase().includes("vault funding"),
+);
+const exampleSettlement = verifiedEvidence.find((entry) =>
+  entry.action.toLowerCase().includes("arc settlement"),
+);
+if (
+  !exampleCreation?.orderId ||
+  !exampleCreation.invoiceVault ||
+  !exampleCreation.amount ||
+  !exampleAttempt?.payer ||
+  !exampleFunding?.amount ||
+  !exampleSettlement?.merchantAmount ||
+  !exampleSettlement.protocolFee ||
+  !exampleSettlement.refundExcess ||
+  !exampleSettlement.finalState
+)
+  throw new Error("Verified example invoice evidence is incomplete");
+
+export const verifiedExampleInvoice = {
+  orderId: exampleCreation.orderId,
+  merchant: exampleCreation.sender,
+  payer: exampleAttempt.payer,
+  vault: exampleCreation.invoiceVault,
+  expectedAmount: exampleCreation.amount,
+  fundedAmount: exampleFunding.amount,
+  merchantAmount: exampleSettlement.merchantAmount,
+  protocolFee: exampleSettlement.protocolFee,
+  refundExcess: exampleSettlement.refundExcess,
+  finalState: exampleSettlement.finalState,
+  vaultUrl: `${ARC_EXPLORER}/address/${exampleCreation.invoiceVault}`,
+  creationUrl: exampleCreation.explorerUrl,
+  fundingUrl: exampleFunding.explorerUrl,
+  settlementUrl: exampleSettlement.explorerUrl,
+} as const;
 
 export const proofTestInventory = {
   contractTests: 24,

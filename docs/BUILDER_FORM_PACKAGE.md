@@ -30,6 +30,7 @@ Invoice vaults live on Arc. Final settlement, merchant payout, and protocol fee 
 
 - USDC: implemented on supported testnets.
 - CCTP V2: implemented and tested in code; final public crosschain transaction evidence pending.
+- Public onchain builder: implementation and deterministic production-mode browser test complete; a new production wallet transaction is still pending operator signature.
 - Forwarding Service: implemented and tested in code; final public transaction correlation pending.
 - Iris API: implemented and tested in code; final public transaction evidence pending.
 - Circle App Kit: wallet/payment integration implemented in the frontend.

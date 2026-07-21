@@ -1534,6 +1534,128 @@ footer > div:first-child {
   }
 }
 
+/* Public Arc Testnet builder mode */
+.mobile-nav {
+  display: none;
+  position: relative;
+}
+.mobile-nav summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+.mobile-nav nav {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  min-width: 220px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--brand-border);
+  border-radius: 12px;
+  background: var(--brand-surface-raised);
+  box-shadow: 0 18px 50px #17182a26;
+}
+.onchain-builder-page,
+.builder-console,
+.invoice-view-page {
+  padding-top: 72px;
+  padding-bottom: 110px;
+}
+.builder-console-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.builder-actions {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.builder-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--brand-primary);
+  font-weight: 700;
+}
+.merchant-panel,
+.confirmation-card,
+.browser-history,
+.invoice-success-card {
+  margin-top: 20px;
+}
+.registration-form {
+  display: grid;
+  gap: 16px;
+}
+.action-panel {
+  margin: 22px 0;
+}
+.compact-details {
+  padding: 14px;
+  border: 1px solid var(--brand-border);
+  border-radius: 12px;
+  background: var(--brand-surface);
+}
+.public-mode-notice {
+  margin-top: 20px;
+  padding: 14px 16px;
+  color: var(--brand-muted);
+  border: 1px solid var(--brand-border);
+  border-radius: 12px;
+  background: var(--brand-surface-raised);
+  font-size: 13px;
+}
+.break-address,
+.details-list strong,
+.history-list strong {
+  overflow-wrap: anywhere;
+}
+.history-list article {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.2fr) minmax(120px, 0.7fr) minmax(220px, 1fr)
+    auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--brand-border);
+}
+.history-list article > div {
+  display: grid;
+  gap: 4px;
+}
+.history-list small,
+.history-list span {
+  color: var(--brand-muted);
+  font-size: 12px;
+}
+.invoice-success-card .button-row,
+.confirmation-card .button {
+  margin-top: 20px;
+}
+.checkout-preview button:disabled {
+  cursor: default;
+  opacity: 0.82;
+}
+
+@media (max-width: 900px) {
+  .site-header .desktop-nav {
+    display: none;
+  }
+  .mobile-nav {
+    display: block;
+  }
+  .builder-console-grid {
+    grid-template-columns: 1fr;
+  }
+  .history-list article {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* SettleLink brand layer. These rules intentionally keep Arc network colors out
    of the product identity; network badges are functional route indicators. */
 .site-header {

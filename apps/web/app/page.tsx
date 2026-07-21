@@ -55,6 +55,9 @@ export default function Home() {
             <Link href="/proof#contracts" className="button secondary">
               Explore deployed contracts
             </Link>
+            <Link href="/invoices/new" className="button secondary">
+              Create a testnet invoice
+            </Link>
           </div>
           <div className="infrastructure-line" aria-label="Infrastructure">
             <span>{brand.infrastructureAttribution}</span>
@@ -63,7 +66,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="checkout-preview" aria-label="Example checkout">
+        <div className="checkout-preview" aria-label="Product flow preview">
           <div className="preview-brand">
             <span className="brand compact">
               <BrandMark className="brand-mark" />
@@ -100,13 +103,21 @@ export default function Home() {
             <span>Estimated source total</span>
             <strong>125.063 USDC</strong>
           </div>
-          <button type="button">Review and pay</button>
-          <p>Crosschain transfer via Circle CCTP · final settlement on Arc</p>
+          <button type="button" disabled>
+            Product flow preview
+          </button>
+          <p>
+            Arc-native invoice creation and settlement are verified. Full Base
+            Sepolia → CCTP → Arc evidence is still being finalized.
+          </p>
         </div>
       </section>
 
-      <section className="network-strip" aria-label="Supported testnet routes">
-        <span>SUPPORTED TESTNET ROUTES</span>
+      <section
+        className="network-strip"
+        aria-label="Implemented testnet routes"
+      >
+        <span>IMPLEMENTED TESTNET ROUTES</span>
         <div>
           <b className="chain-icon base">B</b>Base Sepolia
         </div>
@@ -221,6 +232,9 @@ export default function Home() {
           </div>
           <Link href="/proof" className="button primary">
             View Proof of Build <ArrowRight size={17} />
+          </Link>
+          <Link href="/invoices/new" className="button secondary">
+            Create a testnet invoice
           </Link>
         </div>
       </section>

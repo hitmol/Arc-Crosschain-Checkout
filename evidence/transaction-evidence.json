@@ -36,7 +36,8 @@
     "relatedCommit": "433ca1dbbdb7ae6448efe9decb34886dea9d7a83",
     "invoiceVault": "0x6cc2ae6d5a2e4ddccc96cf4fc35ea4bd30f5ad8c",
     "amount": "1.000000 USDC",
-    "payout": "0x4879a69d08dc2ffe9d63000b74bdeb5f22f2ecf7"
+    "payout": "0x4879a69d08dc2ffe9d63000b74bdeb5f22f2ecf7",
+    "orderId": "0xbc34703ae25daa96c527c760cfd065c4c8666b4616e13f0551e03fe585072fae"
   },
   {
     "action": "Payment attempt registration",
@@ -56,7 +57,8 @@
     "resultingState": "customer EIP-712 authorization locked",
     "relatedCommit": "433ca1dbbdb7ae6448efe9decb34886dea9d7a83",
     "invoiceVault": "0x6cc2ae6d5a2e4ddccc96cf4fc35ea4bd30f5ad8c",
-    "amount": "1.000000 USDC"
+    "amount": "1.000000 USDC",
+    "payer": "0x29b93d1587bbfab7cdc2ab53c18ca4c6108839cd"
   },
   {
     "action": "Vault funding (direct Arc Testnet)",
@@ -99,6 +101,8 @@
     "amount": "1.000000 USDC",
     "payout": "0x4879a69d08dc2ffe9d63000b74bdeb5f22f2ecf7",
     "protocolFee": "0.002500 USDC",
-    "refundExcess": "0.050000 USDC"
+    "refundExcess": "0.050000 USDC",
+    "merchantAmount": "0.997500 USDC",
+    "finalState": "Settled"
   }
 ]

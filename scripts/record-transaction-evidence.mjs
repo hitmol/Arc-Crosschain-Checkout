@@ -143,6 +143,16 @@ const evidence = {
   ...(input["refund-excess"]?.trim()
     ? { refundExcess: input["refund-excess"].trim() }
     : {}),
+  ...(input["order-id"]
+    ? { orderId: assertHash(input["order-id"], "order ID") }
+    : {}),
+  ...(input.payer ? { payer: assertAddress(input.payer, "payer") } : {}),
+  ...(input["merchant-amount"]?.trim()
+    ? { merchantAmount: input["merchant-amount"].trim() }
+    : {}),
+  ...(input["final-state"]?.trim()
+    ? { finalState: input["final-state"].trim() }
+    : {}),
 };
 
 const evidenceFile = path.join(root, "evidence", "transaction-evidence.json");
