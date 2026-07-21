@@ -1,32 +1,49 @@
 "use client";
 
 import { Wallet } from "lucide-react";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useEffect, useRef, useState } from "react";
+import { useAccount, useChainId } from "wagmi";
 import { compactAddress } from "@/lib/api";
+import { wagmiConfig } from "@/lib/wagmi";
+import { WalletConnectDialog } from "./wallet-connect-dialog";
 
 export function WalletButton() {
   const { address, isConnected } = useAccount();
-  const { connectors, connect, isPending } = useConnect();
-  const { disconnect } = useDisconnect();
-  if (isConnected)
-    return (
-      <button
-        className="wallet-button connected"
-        onClick={() => disconnect()}
-        aria-label="Disconnect wallet"
-      >
-        <span className="status-dot" />
-        {compactAddress(address)}
-      </button>
-    );
+  const chainId = useChainId();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [browserReady, setBrowserReady] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const chain = wagmiConfig.chains.find(
+    (candidate) => candidate.id === chainId,
+  );
+
+  useEffect(() => setBrowserReady(true), []);
+
   return (
-    <button
-      className="wallet-button"
-      disabled={isPending || connectors.length === 0}
-      onClick={() => connectors[0] && connect({ connector: connectors[0] })}
-    >
-      <Wallet size={16} />
-      {isPending ? "Connecting…" : "Connect wallet"}
-    </button>
+    <>
+      <button
+        aria-haspopup="dialog"
+        aria-expanded={dialogOpen}
+        aria-label={
+          isConnected
+            ? `Wallet ${compactAddress(address)} connected on ${chain?.name ?? `chain ${chainId}`}. Open wallet details.`
+            : "Connect wallet"
+        }
+        className={`wallet-button ${isConnected ? "connected" : ""}`}
+        onClick={() => setDialogOpen(true)}
+        ref={triggerRef}
+        type="button"
+      >
+        {isConnected ? <span className="status-dot" /> : <Wallet size={16} />}
+        {isConnected ? compactAddress(address) : "Connect wallet"}
+      </button>
+      {browserReady && (
+        <WalletConnectDialog
+          onOpenChange={setDialogOpen}
+          open={dialogOpen}
+          triggerRef={triggerRef}
+        />
+      )}
+    </>
   );
 }

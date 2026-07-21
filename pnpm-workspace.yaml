@@ -5,6 +5,7 @@ packages:
 overrides:
   "jayson@4.3.0>uuid": 11.1.1
   "postcss@8.4.31": 8.5.20
+  "ws@>=8.0.0 <8.21.0": 8.21.1
 
 allowBuilds:
   "@prisma/client": true

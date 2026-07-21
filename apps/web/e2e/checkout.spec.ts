@@ -2,6 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 
 const screenshotDirectory = path.resolve(process.cwd(), "../../evidence/brand");
+const walletEvidenceDirectory = path.resolve(
+  process.cwd(),
+  "../../output/playwright",
+);
 
 async function expectNoHorizontalOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({
@@ -15,11 +19,15 @@ async function expectNoHorizontalOverflow(page: Page) {
 
 const merchant = "0x1111111111111111111111111111111111111111";
 
-test.beforeEach(async ({ page }) => {
+async function installMockWallet(
+  page: Page,
+  options: { rejectFirstRequest?: boolean } = {},
+) {
   await page.addInitScript(
-    ({ account }) => {
+    ({ account, rejectFirstRequest }) => {
       const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
       let chainId = "0x4cef42";
+      let shouldReject = rejectFirstRequest;
       const ethereum = {
         isMetaMask: true,
         on(event: string, listener: (...args: unknown[]) => void) {
@@ -31,8 +39,24 @@ test.beforeEach(async ({ page }) => {
           listeners.get(event)?.delete(listener);
         },
         request({ method, params }: { method: string; params?: unknown[] }) {
-          if (["eth_accounts", "eth_requestAccounts"].includes(method))
+          if (method === "eth_accounts")
+            return Promise.resolve(
+              window.localStorage.getItem("mock.wallet.authorized") === "yes"
+                ? [account]
+                : [],
+            );
+          if (method === "eth_requestAccounts") {
+            if (shouldReject) {
+              shouldReject = false;
+              return Promise.reject(
+                Object.assign(new Error("User rejected the request."), {
+                  code: 4001,
+                }),
+              );
+            }
+            window.localStorage.setItem("mock.wallet.authorized", "yes");
             return Promise.resolve([account]);
+          }
           if (method === "eth_chainId") return Promise.resolve(chainId);
           if (method === "wallet_switchEthereumChain") {
             chainId = (params?.[0] as { chainId: string }).chainId;
@@ -45,6 +69,12 @@ test.beforeEach(async ({ page }) => {
           if (method === "wallet_getPermissions") return Promise.resolve([]);
           if (method === "wallet_requestPermissions")
             return Promise.resolve([{ parentCapability: "eth_accounts" }]);
+          if (method === "wallet_revokePermissions") {
+            window.localStorage.removeItem("mock.wallet.authorized");
+            for (const listener of listeners.get("accountsChanged") ?? [])
+              listener([]);
+            return Promise.resolve(null);
+          }
           return Promise.reject(
             new Error(`Unsupported mock wallet method: ${method}`),
           );
@@ -55,13 +85,54 @@ test.beforeEach(async ({ page }) => {
         value: ethereum,
       });
     },
-    { account: merchant },
+    {
+      account: merchant,
+      rejectFirstRequest: options.rejectFirstRequest ?? false,
+    },
   );
+}
+
+test("wallet chooser handles absent providers and preserves keyboard focus", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "Connect wallet" }).first();
+  await trigger.click();
+  await expect(
+    page.getByRole("heading", { name: "Choose a wallet" }),
+  ).toBeVisible();
+  await expect(page.getByText("Install a browser wallet")).toBeVisible();
+  await expect(page.getByText("WalletConnect unavailable")).toBeVisible();
+  await page.screenshot({
+    path: path.join(walletEvidenceDirectory, "wallet-dialog-no-provider.png"),
+  });
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+});
+
+test("rejected injected connection is recoverable", async ({ page }) => {
+  await installMockWallet(page, { rejectFirstRequest: true });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "Connect wallet" }).first();
+  await trigger.click();
+  await page.getByRole("button", { name: /Browser wallet/ }).click();
+  await expect(
+    page.getByRole("alert").getByText("Connection request was rejected."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Try again" }).click();
+  await page.getByRole("button", { name: /Browser wallet/ }).click();
+  await expect(
+    page.getByRole("button", {
+      name: /Wallet 0x1111.*connected on Arc Testnet/,
+    }),
+  ).toBeVisible();
 });
 
 test("merchant to mocked CCTP settlement, dashboard and receipt", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
+  await installMockWallet(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
@@ -120,6 +191,37 @@ test("merchant to mocked CCTP settlement, dashboard and receipt", async ({
     .getByRole("main")
     .getByRole("button", { name: "Connect wallet" })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "Choose a wallet" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: path.join(walletEvidenceDirectory, "wallet-dialog-injected.png"),
+  });
+  await page.getByRole("button", { name: /Browser wallet/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "E2E Merchant" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "E2E Merchant" }),
+  ).toBeVisible();
+  const connectedWallet = page.getByRole("button", {
+    name: /Wallet 0x1111.*connected on Arc Testnet/,
+  });
+  await connectedWallet.click();
+  await expect(
+    page.getByRole("heading", { name: "Wallet connected" }),
+  ).toBeVisible();
+  await expect(page.getByText("Arc Testnet", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Disconnect wallet" }).click();
+  await page.reload();
+  const reconnect = page
+    .getByRole("main")
+    .getByRole("button", { name: "Connect wallet" });
+  await expect(reconnect).toBeVisible();
+  await reconnect.click();
+  await page.getByRole("button", { name: /Browser wallet/ }).click();
   await expect(
     page.getByRole("heading", { name: "E2E Merchant" }),
   ).toBeVisible();

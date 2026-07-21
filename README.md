@@ -97,6 +97,8 @@ Coverage is generated in CI; no percentage is claimed until the command has run 
 
 Import a deployer into Foundry's encrypted keystore, fund it with Arc Testnet USDC, set the non-secret RPC configuration, and run `pnpm deploy:contracts`. Never pass or commit a plaintext key. Deployment records remain explicitly `pending-credentials` in `deployments/arc-testnet.json` until real receipts exist. See [deployment instructions](docs/DEPLOYMENT.md).
 
+Wallet connections use an explicit EIP-6963/EIP-1193 and WalletConnect chooser. WalletConnect is enabled only with a valid, allowlisted project configuration; see [wallet architecture](docs/WALLET_CONNECTION.md), [operator setup](docs/WALLETCONNECT_SETUP.md), and [verification evidence](docs/WALLET_CONNECTION_EVIDENCE.md).
+
 ## Circle integrations
 
 - Native Circle-issued USDC (6-decimal ERC-20 accounting)

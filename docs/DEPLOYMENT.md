@@ -1,6 +1,6 @@
 # Deployment
 
-The repository is not deployed yet. `deployments/arc-testnet.json` remains `pending-credentials`; null fields are not deployment evidence.
+The web application has preview deployments, but production is not approved. `deployments/arc-testnet.json` remains `pending-credentials`; a Vercel preview and null deployment fields are not contract or mainnet evidence.
 
 ## 1. Final Arc contracts
 
@@ -65,6 +65,8 @@ NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
 NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<public project id>
 ```
+
+The Vercel build runs `scripts/validate-web-deployment-env.mjs`. Production fails closed when required public variables are missing or malformed. Preview remains buildable for design review, but WalletConnect is omitted and live contract actions must remain unavailable. See [WalletConnect setup](WALLETCONNECT_SETUP.md) and [wallet evidence](WALLET_CONNECTION_EVIDENCE.md).
 
 ### API environment
 

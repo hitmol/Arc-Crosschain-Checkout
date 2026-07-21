@@ -17,6 +17,7 @@
     "@circle-fin/adapter-viem-v2": "^1.14.0",
     "@circle-fin/app-kit": "^1.10.0",
     "@tanstack/react-query": "^5.80.7",
+    "@walletconnect/ethereum-provider": "2.21.1",
     "lucide-react": "^0.513.0",
     "next": "^16.2.10",
     "qrcode.react": "^4.2.0",

@@ -15,7 +15,7 @@ test("validates production web, API and worker environments", () => {
       NEXT_PUBLIC_API_URL: "https://api.example",
       NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS: addressA,
       NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS: addressB,
-      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "public-project-id",
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "a".repeat(32),
     }).valid,
     true,
   );
@@ -81,5 +81,20 @@ test("rejects demo mode, insecure databases and mismatched auth domains", () => 
         ALLOWED_WEBHOOK_HOSTS: "merchant.example",
       }),
     /AUTH_DOMAIN/,
+  );
+});
+
+test("rejects a placeholder WalletConnect project ID", () => {
+  assert.throws(
+    () =>
+      validateComponentEnv("web", {
+        ...base,
+        NEXT_PUBLIC_APP_URL: "https://checkout.example",
+        NEXT_PUBLIC_API_URL: "https://api.example",
+        NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS: addressA,
+        NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS: addressB,
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "placeholder",
+      }),
+    /32-character hexadecimal/,
   );
 });

@@ -30,6 +30,15 @@ function address(env, name) {
   return value.toLowerCase();
 }
 
+function walletConnectProjectId(env) {
+  const value = required(env, "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID");
+  if (!/^[a-fA-F0-9]{32}$/.test(value))
+    throw new Error(
+      "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID must be a 32-character hexadecimal project ID",
+    );
+  return value;
+}
+
 function productionBase(env) {
   if (required(env, "NODE_ENV") !== "production")
     throw new Error("NODE_ENV must be production");
@@ -72,7 +81,7 @@ export function validateComponentEnv(component, env) {
     url(env, "NEXT_PUBLIC_APP_URL", { protocols: ["https:"] });
     url(env, "NEXT_PUBLIC_API_URL", { protocols: ["https:"] });
     validatePublicAddresses(env);
-    required(env, "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID");
+    walletConnectProjectId(env);
   }
 
   if (component === "api") {
