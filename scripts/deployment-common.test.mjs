@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   ARC_CHAIN_ID,
   ARC_USDC,
@@ -92,4 +95,22 @@ test("retries transient RPC throttling", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Builder Form package lists only project-owned contracts", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const text = readFileSync(
+    path.join(root, "docs", "BUILDER_FORM_PACKAGE.md"),
+    "utf8",
+  );
+  const section = text
+    .split("## Project-owned contracts")[1]
+    ?.split("## Public links")[0];
+  assert.ok(section, "project-owned contract section is missing");
+  for (const name of names) assert.match(section, new RegExp(name));
+  assert.doesNotMatch(section, new RegExp(ARC_USDC, "i"));
+  assert.doesNotMatch(
+    section,
+    /^-\s+(USDC|TokenMessenger|MessageTransmitter|Forwarding Service)\s*:/im,
+  );
 });

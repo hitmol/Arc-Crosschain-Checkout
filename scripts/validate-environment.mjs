@@ -39,6 +39,22 @@ function walletConnectProjectId(env) {
   return value;
 }
 
+function optionalUrl(env, name, options = {}) {
+  const value = env[name]?.trim();
+  if (!value) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid URL`);
+  }
+  if (options.protocols && !options.protocols.includes(parsed.protocol))
+    throw new Error(`${name} must use ${options.protocols.join(" or ")}`);
+  if (["localhost", "127.0.0.1", "::1"].includes(parsed.hostname))
+    throw new Error(`${name} must not target localhost in production`);
+  return parsed;
+}
+
 function productionBase(env) {
   if (required(env, "NODE_ENV") !== "production")
     throw new Error("NODE_ENV must be production");
@@ -79,9 +95,13 @@ export function validateComponentEnv(component, env) {
 
   if (component === "web") {
     url(env, "NEXT_PUBLIC_APP_URL", { protocols: ["https:"] });
-    url(env, "NEXT_PUBLIC_API_URL", { protocols: ["https:"] });
+    const api = optionalUrl(env, "NEXT_PUBLIC_API_URL", {
+      protocols: ["https:"],
+    });
     validatePublicAddresses(env);
-    walletConnectProjectId(env);
+    if (env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim())
+      walletConnectProjectId(env);
+    return { component, valid: true, mode: api ? "connected" : "read-only" };
   }
 
   if (component === "api") {

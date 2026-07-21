@@ -1,123 +1,46 @@
-# Deployment
+# Deployment status
 
-The web application has preview deployments, but production is not approved. `deployments/arc-testnet.json` remains `pending-credentials`; a Vercel preview and null deployment fields are not contract or mainnet evidence.
+## Completed: Arc Testnet contracts
 
-## 1. Final Arc contracts
+The deployment recorded in [`deployments/arc-testnet.json`](../deployments/arc-testnet.json) has been independently checked against `https://rpc.testnet.arc.network`.
 
-Deployment is intentionally gated on a clean, tagged release candidate, green CI, passing Foundry tests, an encrypted Foundry keystore account, and adequate Arc Testnet USDC gas balance.
+- Network: Arc Testnet
+- Chain ID: `5042002`
+- Deployment block: `52918699`
+- Deployer: `0x4879a69d08dc2ffe9d63000b74bdeb5f22f2ecf7`
+- Treasury: `0x667a87b5bc9e461aa991055aa25e3d8674c42969`
+- Protocol fee: 25 bps
+- Arc USDC interface: `0x3600000000000000000000000000000000000000`
+- Source verification: verified on ArcScan
+- Onchain relationship verification: passed
 
-Prepare locally without sharing secrets:
+| Project-owned contract     | Address                                      | Deployment transaction                                               |
+| -------------------------- | -------------------------------------------- | -------------------------------------------------------------------- |
+| MerchantRegistry           | `0x10d4611a4c434d990744bfd043bfacdb6d0edd08` | `0xcb7e3553c62765c5ac55f98e1bb7e1c37083aee7440fa0398a3da7d266313d0e` |
+| FeeManager                 | `0x26b96dcb948288f1de15db321ffc0c034ecf7800` | `0xfa59d04b6f834ce042430d70f3114b205f8a62f03271d4ed2518f4e29e5d738f` |
+| PaymentVaultImplementation | `0xd75c73b64485ba0432f6c2f4d0465de2abfa6e74` | `0x100711cb725e03fb589529f6a92a9c139f6ec64ffc735bce2af2a99e5bafac2b` |
+| CheckoutFactory            | `0x7d1d153bbb9f9e5ea8dbb83c295bf1fce0d2772e` | `0x590a60175a6ea942b9b9bb460612d16f89a3138522771ac588fb290699a181cc` |
 
-```text
-cast wallet import arc-checkout-deployer
-git tag v0.1.0-hackathon-rc1
-git push origin v0.1.0-hackathon-rc1
+Verify locally without mutating the record:
+
+```bash
+ARC_RPC_URL=https://rpc.testnet.arc.network pnpm verify:deployment
 ```
 
-Set `ARC_RPC_URL`, `FOUNDRY_ACCOUNT`, `PROTOCOL_TREASURY`, and optionally `PROTOCOL_FEE_BPS`, `ARC_USDC_ADDRESS`, and `MIN_DEPLOYER_GAS_WEI` in the local shell or secret manager. Never pass a plaintext private key. Then run:
+The verifier rejects a wrong chain, missing or reverted deployment receipts, absent bytecode, wrong owners, wrong treasury/fee, or mismatched factory relationships.
 
-```text
-pnpm deploy:preflight
-pnpm deploy:contracts
-pnpm verify:deployment -- --write
-```
+## Completed: public frontend mode
 
-The cross-platform wrapper:
+The Vercel frontend is designed to run as a stable public read-only builder preview when `NEXT_PUBLIC_API_URL` is absent. `/proof` reads the verified deployment and evidence records at build time. Backend-dependent routes clearly disclose that the merchant backend is unavailable.
 
-- verifies Arc chain ID `5042002`;
-- requires the official Arc Testnet USDC `0x3600000000000000000000000000000000000000`, deployed bytecode, and `decimals() == 6`;
-- resolves the deployer only from `FOUNDRY_ACCOUNT` and rejects plaintext-key inputs;
-- validates treasury, fee bounds, and minimum native Arc USDC gas balance;
-- runs all Foundry tests before broadcasting;
-- parses Foundry receipts for all four deployments;
-- verifies bytecode, successful receipts, owners, treasury, protocol fee, and every CheckoutFactory constructor relationship;
-- atomically replaces `deployments/arc-testnet.json` only after all checks pass.
+Production never silently falls back to `http://localhost:4000`. A configured production API must use HTTPS and must not target localhost.
 
-ArcScan source verification is a separate best-effort operation. An ArcScan outage must not invalidate a successfully receipt-verified deployment, and the source-verification status must be recorded independently.
+## Pending live infrastructure
 
-## 2. Application topology
+- production API, worker, PostgreSQL connection, and Arc indexer;
+- live signed webhook delivery;
+- production monitoring and RPC redundancy;
+- full Base Sepolia → Circle CCTP → Arc evidence;
+- mainnet deployment and external audit.
 
-Deploy four separate components:
-
-1. PostgreSQL 16+ with TLS, restricted network access, migrations, and backups.
-2. `apps/api` as a long-running Node service.
-3. `apps/worker` as a continuously running process, never as an ephemeral request-only function.
-4. `apps/web` on Vercel or an equivalent Next.js platform.
-
-Run `pnpm --filter @arc-checkout/database migrate:deploy` against the production database before rolling out API or worker.
-
-For Railway, create two services from this repository and set their config-file
-paths to `/railway.api.json` and `/railway.worker.json`. The checked-in profiles
-select the correct Dockerfile, share monorepo watch paths, require the service
-health endpoint, and restart continuously. Both processes accept the platform
-`PORT` variable while retaining `API_PORT` and `WORKER_PORT` overrides for
-self-hosting. Only the API service needs a public domain; keep the worker domain
-disabled after its health check is confirmed.
-
-`Dockerfile.api` and `Dockerfile.worker` build the two Node services from the monorepo and define health checks. `vercel.json` builds the Next.js workspace from the repository root so its shared workspace packages remain available. Validate each secret set before rollout:
-
-```text
-pnpm validate:env web
-pnpm validate:env api
-pnpm validate:env worker
-```
-
-### Frontend environment
-
-```text
-NODE_ENV=production
-DEMO_MODE=false
-NEXT_PUBLIC_APP_URL=https://<frontend-host>
-NEXT_PUBLIC_API_URL=https://<api-host>
-NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
-NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<public project id>
-```
-
-The Vercel build runs `scripts/validate-web-deployment-env.mjs`. Production fails closed when required public variables are missing or malformed. Preview remains buildable for design review, but WalletConnect is omitted and live contract actions must remain unavailable. See [WalletConnect setup](WALLETCONNECT_SETUP.md) and [wallet evidence](WALLET_CONNECTION_EVIDENCE.md).
-
-### API environment
-
-```text
-NODE_ENV=production
-DEMO_MODE=false
-DATABASE_URL=<TLS PostgreSQL URL>
-NEXT_PUBLIC_APP_URL=https://<frontend-host>
-AUTH_DOMAIN=<frontend-host-without-scheme>
-ARC_RPC_URL=https://rpc.testnet.arc.network
-ARC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
-ARC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
-WEBHOOK_ENCRYPTION_KEY=<base64 32-byte secret>
-ALLOWED_WEBHOOK_HOSTS=<comma-separated merchant hosts>
-```
-
-### Worker environment
-
-```text
-NODE_ENV=production
-DEMO_MODE=false
-DATABASE_URL=<same TLS PostgreSQL URL>
-ARC_RPC_URL=https://rpc.testnet.arc.network
-ARC_CHECKOUT_FACTORY_ADDRESS=<verified deployment>
-ARC_MERCHANT_REGISTRY_ADDRESS=<verified deployment>
-ARC_DEPLOYMENT_BLOCK=<verified deployment block>
-ARC_INDEXER_PAGE_SIZE=1000
-CIRCLE_API_BASE_URL=https://iris-api-sandbox.circle.com
-WEBHOOK_ENCRYPTION_KEY=<same secret as API>
-SETTLER_PRIVATE_KEY=<optional dedicated low-value key>
-```
-
-If automated settlement is enabled, create a dedicated low-value settler wallet, fund it with minimal Arc Testnet USDC, never reuse the deployer, merchant, treasury, or customer key, and store it only in the platform secret manager.
-
-## 3. Health and rollout checks
-
-- `GET /api/health` verifies API process and database connectivity.
-- Worker `GET /health` (default port `4001`) reports database, Arc RPC, Circle API reachability, worker tick state, cursor, finalized head, lag, and indexer errors.
-- Treat database/RPC/Circle failure, worker tick errors, or growing finalized-block lag as rollout failures.
-- Verify CORS credentials, CSP/security headers, TLS, rate limits, request limits, backups, and alerting.
-
-## 4. Evidence and rollback
-
-Record each successful receipt with `pnpm record:evidence -- ...`; see the command help and `docs/TRANSACTION_EVIDENCE.md`. Do not type hashes or URLs into submission material until the recorder or equivalent direct verification confirms them.
-
-Application services can roll back to a prior immutable image. Contract deployments cannot roll back; pause only new invoice creation if necessary, preserve settlement/refund paths, and deploy a new version rather than mutating recorded evidence.
+The current public proof package does not depend on those pending items.

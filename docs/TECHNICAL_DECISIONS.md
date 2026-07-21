@@ -22,7 +22,7 @@ Prisma/PostgreSQL provides durable attempts, cursors, webhook retries, and dashb
 
 ## No upgradeable protocol
 
-The factory, registry, manager, and vault implementation are intentionally non-upgradeable. New versions require new deployments and explicit migration, reducing hackathon governance risk.
+The factory, registry, manager, and vault implementation are intentionally non-upgradeable. New versions require new deployments and explicit migration, reducing privileged upgrade and governance risk.
 
 ## Testnet configuration
 

@@ -49,11 +49,11 @@ export default function Home() {
             dedicated invoice vault on Arc.
           </p>
           <div className="hero-actions">
-            <Link href="/invoices/new" className="button primary">
-              Create a testnet invoice <ArrowRight size={17} />
+            <Link href="/proof" className="button primary">
+              View Proof of Build <ArrowRight size={17} />
             </Link>
-            <Link href="/pay/demo-1042" className="button secondary">
-              Try the working demo
+            <Link href="/proof#contracts" className="button secondary">
+              Explore deployed contracts
             </Link>
           </div>
           <div className="infrastructure-line" aria-label="Infrastructure">
@@ -214,11 +214,13 @@ export default function Home() {
         </div>
         <div className="final-cta">
           <div>
-            <span className="section-kicker">TESTNET READY</span>
-            <h2>Create a crosschain USDC payment link.</h2>
+            <span className="section-kicker">PUBLIC BUILDER PREVIEW</span>
+            <h2>
+              Verify the contracts, configuration, and transaction evidence.
+            </h2>
           </div>
-          <Link href="/onboarding" className="button primary">
-            Start merchant setup <ArrowRight size={17} />
+          <Link href="/proof" className="button primary">
+            View Proof of Build <ArrowRight size={17} />
           </Link>
         </div>
       </section>

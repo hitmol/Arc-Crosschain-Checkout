@@ -5,6 +5,7 @@ export default function DocsPage() {
     <div className="page-shell docs-grid">
       <nav className="docs-nav" aria-label="Documentation sections">
         <a href="#overview">Overview</a>
+        <a href="#evidence">Evidence</a>
         <a href="#flow">Payment flow</a>
         <a href="#sdk">SDK</a>
         <a href="#webhooks">Webhooks</a>
@@ -23,6 +24,14 @@ export default function DocsPage() {
         <p className="infrastructure-callout">
           <strong>{brand.infrastructureAttribution}.</strong> Arc provides the
           destination settlement layer; it is not the product brand or operator.
+        </p>
+        <h2 id="evidence">Public verification</h2>
+        <p>
+          The public builder preview operates in read-only mode when no live API
+          URL is configured. Its <a href="/proof">Proof of Build</a> page parses
+          the RPC-verified Arc deployment record and successful transaction
+          receipts; unavailable interactions are explicitly marked as not yet
+          recorded.
         </p>
         <h2 id="flow">Payment flow</h2>
         <ol>

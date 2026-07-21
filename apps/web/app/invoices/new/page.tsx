@@ -12,7 +12,8 @@ import {
 } from "wagmi";
 import { arcTestnet } from "viem/chains";
 import { parseUsdc, orderIdToBytes32 } from "@arc-checkout/shared";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, PUBLIC_READ_ONLY_MODE } from "@/lib/api";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { ensureMerchantSession } from "@/lib/merchant-auth";
 import { checkoutFactoryAbi } from "@/lib/contracts";
 import { QRCodeSVG } from "qrcode.react";
@@ -39,6 +40,12 @@ type PendingImport = {
 const pendingImportKey = "arc-checkout.pending-invoice-import";
 
 export default function CreateInvoicePage() {
+  if (PUBLIC_READ_ONLY_MODE)
+    return <ReadOnlyNotice feature="Invoice creation" />;
+  return <InteractiveCreateInvoicePage />;
+}
+
+function InteractiveCreateInvoicePage() {
   const { address } = useAccount();
   const chainId = useChainId();
   const publicClient = usePublicClient({ chainId: arcTestnet.id });

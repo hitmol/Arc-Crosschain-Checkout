@@ -98,3 +98,28 @@ test("rejects a placeholder WalletConnect project ID", () => {
     /32-character hexadecimal/,
   );
 });
+
+test("accepts an explicit production read-only web environment", () => {
+  const result = validateComponentEnv("web", {
+    ...base,
+    NEXT_PUBLIC_APP_URL: "https://settlelink.vercel.app",
+    NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS: addressA,
+    NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS: addressB,
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.mode, "read-only");
+});
+
+test("rejects a localhost API fallback in production", () => {
+  assert.throws(
+    () =>
+      validateComponentEnv("web", {
+        ...base,
+        NEXT_PUBLIC_APP_URL: "https://settlelink.vercel.app",
+        NEXT_PUBLIC_API_URL: "http://localhost:4000",
+        NEXT_PUBLIC_CHECKOUT_FACTORY_ADDRESS: addressA,
+        NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS: addressB,
+      }),
+    /https:|localhost/,
+  );
+});

@@ -1,13 +1,28 @@
 # Known limitations
 
-- Arc is testnet-only in this project.
-- No project contracts or real CCTP transaction have been deployed/executed without user credentials.
-- Contracts are not professionally audited.
-- Refunds pay an Arc address and do not automatically return crosschain.
-- Merchant mutations use nonce-protected wallet-signature sessions. Server API keys are hashed, scoped, revocable and shown only once, but account recovery and administrative audit UI remain pending.
-- App Kit and Forwarding depend on Circle and RPC availability.
-- The Arc indexer is finalized-block, cursor-based, paginated, idempotent, restart-tested, and exposes lag/error health. Production RPC failover and high-volume sharding remain pending.
-- The web dashboard consumes authenticated, merchant-scoped indexed data with filtering, pagination, refresh, loading, empty, and error states. The public `/receipts/[invoiceSlug]` page consumes verified receipt records and supports printing, copy controls, explorer links, and JSON download. A signed PDF receipt is not implemented.
-- The customer EIP-712 attempt, attempt-before-burn registration, server-issued quote, App Kit recovery state, and receipt-based CCTP reconciliation are implemented. A real testnet transfer still requires deployed project contracts, funded customer wallets, and operator-provided RPC/configuration evidence.
-- Solana Devnet is intentionally deferred until the EVM flow is demonstrated reliably.
-- The browser E2E suite uses a local mock CCTP lifecycle. It proves the application flow but is not a substitute for the required public testnet transaction evidence.
+## Current testnet preview
+
+- SettleLink is Arc Testnet software and has not been externally audited.
+- The public frontend is a read-only builder preview while the production API and worker are disabled.
+- Backend-dependent merchant onboarding, invoice creation, dashboard, checkout, and receipt pages disclose that limitation instead of using mock production data.
+- WalletConnect QR requires a valid WalletConnect project ID and exact production-origin allowlisting; manual evidence must not be marked complete until tested.
+- Browser wallet availability depends on the reviewer having an injected provider such as MetaMask or Rabby.
+
+## Crosschain route
+
+- Circle CCTP V2 and the Forwarding Service are implemented and tested in code, but full public Base Sepolia → Arc transaction evidence is pending.
+- Direct Arc Testnet USDC vault funding proves vault settlement only; it is not evidence of a completed crosschain payment.
+- Crosschain transfers are asynchronous and rely on Circle attestation/forwarding availability.
+- Automatic crosschain refunds are not universally atomic. Recovery may require expiry, attestation, or manual operator coordination.
+
+## Smart contracts
+
+- Timestamp-based expiry uses Arc block time and inherits normal validator timestamp tolerance.
+- Settlement is permissionless by design and can only use the payout and fee snapshot stored in the vault.
+- A successful customer-authorized payment attempt must be registered before settlement/refund logic can proceed.
+- Mainnet deployment, formal verification, and an external audit remain roadmap items.
+
+## Operations
+
+- Production monitoring, RPC failover, rate-limit tuning, key rotation, disaster recovery drills, and merchant support procedures are not yet live.
+- No real merchant adoption, payment volume, or endorsement is claimed.

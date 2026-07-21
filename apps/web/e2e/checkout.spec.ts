@@ -110,6 +110,37 @@ test("wallet chooser handles absent providers and preserves keyboard focus", asy
   await expect(trigger).toBeFocused();
 });
 
+test("public navigation exposes proof, contracts, and GitHub", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("link", { name: "Proof of Build" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Contracts" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "GitHub" }).first(),
+  ).toHaveAttribute(
+    "href",
+    "https://github.com/hitmol/Arc-Crosschain-Checkout",
+  );
+});
+
+test("proof renders verified deployment data and pending evidence", async ({
+  page,
+}) => {
+  await page.goto("/proof");
+  await expect(
+    page.getByRole("heading", { name: "Proof of Build" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "MerchantRegistry", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Not yet recorded").first()).toBeVisible();
+});
+
 test("rejected injected connection is recoverable", async ({ page }) => {
   await installMockWallet(page, { rejectFirstRequest: true });
   await page.goto("/");

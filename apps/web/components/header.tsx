@@ -11,10 +11,17 @@ export function Header() {
         <span>{brand.productName}</span>
       </Link>
       <nav aria-label="Primary">
-        <Link href="/#how-it-works">How it works</Link>
+        <Link href="/proof">Proof of Build</Link>
+        <Link href="/proof#contracts">Contracts</Link>
         <Link href="/dashboard">Dashboard</Link>
-        <Link href="/invoices/new">Create invoice</Link>
         <Link href="/docs">Docs</Link>
+        <a
+          href="https://github.com/hitmol/Arc-Crosschain-Checkout"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub
+        </a>
       </nav>
       <WalletButton />
     </header>

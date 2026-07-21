@@ -15,12 +15,20 @@ import { arcTestnet } from "viem/chains";
 import { merchantRegistryAbi } from "@/lib/contracts";
 import { WalletButton } from "@/components/wallet-button";
 import { apiFetch } from "@/lib/api";
+import { PUBLIC_READ_ONLY_MODE } from "@/lib/api";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { ensureMerchantSession } from "@/lib/merchant-auth";
 
 const registryAddress = process.env.NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS as
   `0x${string}` | undefined;
 
 export default function OnboardingPage() {
+  if (PUBLIC_READ_ONLY_MODE)
+    return <ReadOnlyNotice feature="Merchant onboarding" />;
+  return <InteractiveOnboardingPage />;
+}
+
+function InteractiveOnboardingPage() {
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();

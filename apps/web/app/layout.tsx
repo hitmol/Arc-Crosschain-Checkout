@@ -56,6 +56,15 @@ export default async function RootLayout({
               <small>{brand.legalDisclaimer}</small>
             </div>
             <div className="footer-links">
+              <a href="/proof">Proof of Build</a>
+              <a href="/proof#contracts">Contracts</a>
+              <a
+                href="https://github.com/hitmol/Arc-Crosschain-Checkout"
+                target="_blank"
+                rel="noreferrer"
+              >
+                GitHub
+              </a>
               <span>{brand.infrastructureAttribution}</span>
               <span>{brand.protocolAttribution}</span>
               <a href="https://docs.arc.io" target="_blank" rel="noreferrer">

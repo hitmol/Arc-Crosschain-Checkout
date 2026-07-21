@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { API_URL } from "@/lib/api";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
 import type { VerifiedReceipt } from "./receipt-types";
 import { ReceiptView } from "./receipt-view";
 
@@ -11,6 +12,7 @@ export default async function ReceiptPage({
   params: Promise<{ invoiceSlug: string }>;
 }) {
   const { invoiceSlug } = await params;
+  if (!API_URL) return <ReadOnlyNotice feature={`Receipt ${invoiceSlug}`} />;
   const response = await fetch(
     `${API_URL}/api/receipts/${encodeURIComponent(invoiceSlug)}`,
     { cache: "no-store" },
