@@ -83,7 +83,10 @@ const env = z
     WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
     LOG_LEVEL: z.string().default("info"),
   })
-  .parse(process.env);
+  .parse({
+    ...process.env,
+    WORKER_PORT: process.env.WORKER_PORT ?? process.env.PORT,
+  });
 
 if (env.NODE_ENV === "production" && env.DEMO_MODE) {
   throw new Error("DEMO_MODE cannot be enabled when NODE_ENV=production");

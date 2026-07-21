@@ -46,6 +46,14 @@ Deploy four separate components:
 
 Run `pnpm --filter @arc-checkout/database migrate:deploy` against the production database before rolling out API or worker.
 
+For Railway, create two services from this repository and set their config-file
+paths to `/railway.api.json` and `/railway.worker.json`. The checked-in profiles
+select the correct Dockerfile, share monorepo watch paths, require the service
+health endpoint, and restart continuously. Both processes accept the platform
+`PORT` variable while retaining `API_PORT` and `WORKER_PORT` overrides for
+self-hosting. Only the API service needs a public domain; keep the worker domain
+disabled after its health check is confirmed.
+
 `Dockerfile.api` and `Dockerfile.worker` build the two Node services from the monorepo and define health checks. `vercel.json` builds the Next.js workspace from the repository root so its shared workspace packages remain available. Validate each secret set before rollout:
 
 ```text

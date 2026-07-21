@@ -26,7 +26,10 @@ const configSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
 });
 
-export const config = configSchema.parse(process.env);
+export const config = configSchema.parse({
+  ...process.env,
+  API_PORT: process.env.API_PORT ?? process.env.PORT,
+});
 
 if (config.NODE_ENV === "production" && config.DEMO_MODE) {
   throw new Error("DEMO_MODE cannot be enabled when NODE_ENV=production");
