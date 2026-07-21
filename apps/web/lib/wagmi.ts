@@ -1,9 +1,10 @@
 import { createConfig, http, type CreateConnectorFn } from "wagmi";
 import { injected, walletConnect } from "wagmi/connectors";
-import { fallback } from "viem";
+import { custom, fallback } from "viem";
 import { arcTestnet, baseSepolia, sepolia } from "viem/chains";
 import { brand } from "./brand";
 import { resolveWalletPublicConfig } from "./wallet-connection";
+import { arcRpcProxyProvider } from "./arc-rpc-transport";
 
 export const walletPublicConfig = resolveWalletPublicConfig({
   appUrl: process.env.NEXT_PUBLIC_APP_URL,
@@ -42,14 +43,14 @@ export const wagmiConfig = createConfig({
   transports: {
     [arcTestnet.id]: fallback(
       [
+        custom(arcRpcProxyProvider, {
+          retryCount: 2,
+          retryDelay: 250,
+        }),
         http("https://rpc.testnet.arc.network", {
           retryCount: 2,
           retryDelay: 250,
           timeout: 10_000,
-        }),
-        http("/api/arc-rpc", {
-          retryCount: 1,
-          timeout: 15_000,
         }),
       ],
       { rank: false },

@@ -284,8 +284,11 @@ async function installOnchainMockWallet(
             : input instanceof URL
               ? input.href
               : input.url;
-        if (url.replace(/\/$/, "") !== config.rpcUrl)
-          return originalFetch(input, init);
+        const normalizedUrl = url.replace(/\/$/, "");
+        const isArcRpc =
+          normalizedUrl === config.rpcUrl ||
+          new URL(url, window.location.origin).pathname === "/api/arc-rpc";
+        if (!isArcRpc) return originalFetch(input, init);
         const requestBody =
           typeof init?.body === "string"
             ? init.body
@@ -368,6 +371,7 @@ async function installOnchainMockWallet(
             const transaction = params?.[0] as { data: string; to: string };
             if (transaction.to.toLowerCase() === config.registry) {
               state.registered = true;
+              if (rejectFirstTransaction) state.rejectTransaction = true;
               return Promise.resolve(config.registrationHash);
             }
             const body = stripHex(transaction.data).slice(8);
@@ -656,7 +660,7 @@ test("responsive public pages and authenticated demo dashboard", async ({
 test("creates and recovers a verified onchain invoice", async ({ page }) => {
   test.setTimeout(90_000);
   await installOnchainMockWallet(page, {
-    initialRegistered: true,
+    initialRegistered: false,
     rejectFirstTransaction: true,
   });
   const unexpectedApiRequests: string[] = [];
@@ -670,6 +674,13 @@ test("creates and recovers a verified onchain invoice", async ({ page }) => {
     .getByRole("button", { name: "Connect wallet" })
     .click();
   await page.getByRole("button", { name: /Browser wallet/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Register as a merchant" }),
+  ).toBeVisible();
+  await page.getByLabel("Business label (optional)").fill("E2E Merchant");
+  await page.getByRole("button", { name: "Register as a merchant" }).click();
+  await expect(page.getByRole("alert").getByText(/rejected/i)).toBeVisible();
+  await page.getByRole("button", { name: "Register as a merchant" }).click();
   await expect(page.getByText("Active", { exact: true })).toBeVisible();
 
   await page.getByLabel("Order reference").fill("E2E-ARC-1042");

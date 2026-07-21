@@ -52,6 +52,7 @@ function isAllowedPayload(value: unknown): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const origin = request.headers.get("origin");
   if (origin && origin !== request.nextUrl.origin)
     return NextResponse.json(
@@ -85,6 +86,10 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
 
+  const methods = (Array.isArray(payload) ? payload : [payload]).map(
+    (entry) => (entry as JsonRpcRequest).method,
+  );
+
   try {
     const upstream = await fetch(ARC_RPC_URL, {
       method: "POST",
@@ -96,6 +101,11 @@ export async function POST(request: NextRequest) {
       signal: AbortSignal.timeout(12_000),
     });
     const responseBody = await upstream.text();
+    console.info("[arc-rpc] request completed", {
+      methods,
+      status: upstream.status,
+      durationMs: Date.now() - startedAt,
+    });
     return new NextResponse(responseBody, {
       status: upstream.status,
       headers: {
@@ -105,6 +115,10 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch {
+    console.warn("[arc-rpc] upstream unavailable", {
+      methods,
+      durationMs: Date.now() - startedAt,
+    });
     return NextResponse.json(
       { error: "Arc RPC is temporarily unavailable" },
       { status: 502, headers: { "cache-control": "no-store" } },
