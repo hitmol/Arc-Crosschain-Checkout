@@ -1,6 +1,6 @@
 # Arc Builder Form package
 
-Ready-to-copy factual answers. Replace only bracketed operator details and add interaction hashes after they are recorded.
+Ready-to-copy factual answers. Replace only bracketed operator details.
 
 ## Project name
 
@@ -54,7 +54,7 @@ USDC, CCTP contracts, the Forwarding Service, and wallets are not project-owned.
 
 ## Current status
 
-Arc Testnet contracts are deployed and source verified. The deployment configuration and receipts pass independent Arc RPC verification. Real merchant registration, invoice creation, direct Arc vault funding, and settlement evidence will be stated here only after those transactions are recorded. The full public CCTP route is still being finalized.
+Arc Testnet contracts are deployed and source verified. The deployment configuration and receipts pass independent Arc RPC verification. A real merchant registration, invoice creation, EIP-712 payment attempt, direct Arc vault funding, and final settlement are publicly recorded. The 1.000000 USDC invoice distributed 0.997500 USDC to the merchant, 0.002500 USDC to the treasury, and refunded 0.050000 USDC excess to the customer. The full public CCTP route is still being finalized and is not claimed as complete.
 
 ## Builder contribution
 

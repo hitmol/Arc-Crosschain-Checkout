@@ -27,9 +27,10 @@ describe("public proof data", () => {
     }
   });
 
-  it("labels missing interaction evidence without inventing hashes", () => {
+  it("exposes verified Arc activity and labels only CCTP as pending", () => {
     const missing = interactionEvidence.filter((item) => !item.evidence);
-    expect(missing.length).toBeGreaterThan(0);
+    expect(interactionEvidence.filter((item) => item.evidence)).toHaveLength(5);
+    expect(missing.map((item) => item.key)).toEqual(["cctp"]);
     expect(JSON.stringify(missing)).not.toMatch(/0x0{64}/i);
   });
 

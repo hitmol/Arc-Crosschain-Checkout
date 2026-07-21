@@ -239,9 +239,17 @@ try {
   $finalState = (& $cast call $vault "paymentState()(uint8)" --rpc-url $rpcUrl).Trim()
   $finalBalance = (& $cast call $usdc "balanceOf(address)(uint256)" $vault --rpc-url $rpcUrl).Trim()
   if ($finalState -notmatch '^3' -or $finalBalance -notmatch '^0') { throw "Final vault state verification failed" }
-  & $cast call $vault "settle()" --from $customer --rpc-url $rpcUrl 2>&1 | Out-Null
-  if ($LASTEXITCODE -eq 0) { throw "Second settlement unexpectedly succeeded" }
-  Write-Host "Second settlement correctly reverted."
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    & $cast call $vault "settle()" --from $customer --rpc-url $rpcUrl 2>&1 | Out-Null
+    $secondSettlementExitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  if ($secondSettlementExitCode -eq 0) { throw "Second settlement unexpectedly succeeded" }
+  Write-Host "Second settlement correctly reverted with InvalidState()."
 
   Record-IfMissing -Action "Merchant registration" -Hash $registerHash -Contract $registry `
     -Method "registerMerchant" -Event "MerchantRegistered" -Topic $merchantTopic `

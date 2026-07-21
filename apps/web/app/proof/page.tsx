@@ -11,6 +11,7 @@ import {
   ARC_EXPLORER,
   GITHUB_ACTIONS,
   GITHUB_REPOSITORY,
+  PUBLIC_RELEASE_TAG,
   arcDeployment,
   interactionEvidence,
   projectContracts,
@@ -107,7 +108,11 @@ export default function ProofPage() {
             </a>
           </div>
           <div>
-            <span>Recorded release tag</span>
+            <span>Builder release</span>
+            <strong>{PUBLIC_RELEASE_TAG}</strong>
+          </div>
+          <div>
+            <span>Deployment provenance tag</span>
             <strong>{arcDeployment.tag} (deployment provenance)</strong>
           </div>
           <div>
@@ -218,7 +223,15 @@ export default function ProofPage() {
         <div className="evidence-list">
           {interactionEvidence.map((item) => (
             <div key={item.key}>
-              <span>{item.label}</span>
+              <span className="evidence-summary">
+                <strong>{item.label}</strong>
+                {item.evidence ? (
+                  <small>
+                    {item.evidence.observedEvent} · block {item.evidence.block}
+                    {item.evidence.amount ? ` · ${item.evidence.amount}` : ""}
+                  </small>
+                ) : null}
+              </span>
               {item.evidence ? (
                 <a
                   href={item.evidence.explorerUrl}
@@ -234,6 +247,11 @@ export default function ProofPage() {
             </div>
           ))}
         </div>
+        <p className="section-intro">
+          Recorded final state: Settled. Protocol fee: 0.002500 USDC. Customer
+          excess refund: 0.050000 USDC. A second settlement call reverted with
+          InvalidState(), confirming replay protection.
+        </p>
         <Link href="/docs#evidence">How evidence is verified</Link>
       </section>
 
@@ -298,6 +316,8 @@ export default function ProofPage() {
               <li>Wallet chooser implementation</li>
               <li>Automated tests</li>
               <li>Deployment transactions</li>
+              <li>Merchant registration and invoice creation</li>
+              <li>EIP-712 payment attempt and Arc settlement</li>
             </ul>
           </article>
           <article>

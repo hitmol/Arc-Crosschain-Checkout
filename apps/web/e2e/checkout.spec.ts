@@ -128,7 +128,7 @@ test("public navigation exposes proof, contracts, and GitHub", async ({
   );
 });
 
-test("proof renders verified deployment data and pending evidence", async ({
+test("proof renders verified Arc activity and labels CCTP as pending", async ({
   page,
 }) => {
   await page.goto("/proof");
@@ -138,7 +138,13 @@ test("proof renders verified deployment data and pending evidence", async ({
   await expect(
     page.getByRole("heading", { name: "MerchantRegistry", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Not yet recorded").first()).toBeVisible();
+  await expect(
+    page.locator(
+      'a[href="https://testnet.arcscan.app/tx/0xeccbc52892cd6048bff8483cc678518cf328fd7df88fba38bf2dc9eeb29ba8f6"]',
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("Full CCTP route")).toBeVisible();
+  await expect(page.getByText("Not yet recorded")).toBeVisible();
 });
 
 test("rejected injected connection is recoverable", async ({ page }) => {

@@ -53,7 +53,13 @@ USDC, TokenMessengerV2, MessageTransmitterV2, TokenMinterV2, and Forwarding Serv
 
 ## Deployment evidence
 
-Pending credentials. No address, hash, live URL, or transaction is claimed until verified.
+- Public frontend: https://arc-crosschain-checkout.vercel.app
+- Proof of Build: https://arc-crosschain-checkout.vercel.app/proof
+- Arc Testnet chain ID: `5042002`
+- CheckoutFactory: `0x7d1d153bbb9f9e5ea8dbb83c295bf1fce0d2772e`
+- Transaction evidence: https://github.com/hitmol/Arc-Crosschain-Checkout/blob/main/docs/TRANSACTION_EVIDENCE.md
+
+The deployment and recorded Arc-native interaction receipts are RPC verified. The direct Arc funding proves invoice settlement but is not claimed as completed CCTP evidence.
 
 ## Production roadmap
 

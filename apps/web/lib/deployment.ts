@@ -75,6 +75,7 @@ export const ARC_EXPLORER = "https://testnet.arcscan.app";
 export const GITHUB_REPOSITORY =
   "https://github.com/hitmol/Arc-Crosschain-Checkout";
 export const GITHUB_ACTIONS = `${GITHUB_REPOSITORY}/actions`;
+export const PUBLIC_RELEASE_TAG = "v0.1.0-builder-preview";
 
 export const projectContracts = [
   {
@@ -103,8 +104,17 @@ export const projectContracts = [
 }));
 
 const interactionDefinitions = [
-  { key: "merchant", label: "Merchant registration", match: "merchant registration" },
+  {
+    key: "merchant",
+    label: "Merchant registration",
+    match: "merchant registration",
+  },
   { key: "invoice", label: "Invoice creation", match: "invoice creation" },
+  {
+    key: "attempt",
+    label: "EIP-712 payment attempt",
+    match: "payment attempt registration",
+  },
   { key: "funding", label: "Direct Arc Testnet vault funding", match: "vault funding" },
   { key: "settlement", label: "Arc settlement", match: "arc settlement" },
   { key: "cctp", label: "Full CCTP route", match: "cctp burn" },

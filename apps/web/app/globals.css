@@ -1442,6 +1442,13 @@ footer > div:first-child {
   margin: 20px 0;
   border-bottom: 1px solid var(--brand-border);
 }
+.evidence-summary {
+  display: grid;
+  gap: 3px;
+}
+.evidence-summary small {
+  color: var(--brand-muted);
+}
 .status-columns > div:last-child {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

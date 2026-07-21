@@ -14,6 +14,7 @@ A merchant creates an invoice, a deterministic settlement vault exists on Arc, t
 - Four project-owned contracts are deployed on Arc Testnet (chain ID `5042002`).
 - Contract source is verified on ArcScan and the recorded configuration passes independent RPC verification.
 - Deployment transactions and block `52918699` are recorded in [`deployments/arc-testnet.json`](deployments/arc-testnet.json).
+- A real merchant registration, invoice creation, EIP-712 payment attempt, direct Arc Testnet USDC funding, and settlement are recorded with successful receipts in [`evidence/transaction-evidence.json`](evidence/transaction-evidence.json).
 - Wallet connection, contract interactions, CCTP routing, API, worker, indexer, PostgreSQL/Prisma, and signed webhook delivery are implemented in the repository.
 - Automated Foundry, Vitest, and Playwright suites run in CI.
 - The software is testnet-only and has not received an external smart-contract audit.
@@ -59,6 +60,7 @@ The invoice vault is the onchain source of truth for expected amount, payout, re
 - wallet chooser implementation;
 - automated Foundry, Vitest, and Playwright tests;
 - contract deployment transactions.
+- real Arc-native checkout activity through final settlement, including protocol fee and excess refund distribution.
 
 ### Implemented but still being validated
 
@@ -105,6 +107,6 @@ See [`docs/LOCAL_DEVELOPMENT.md`](docs/LOCAL_DEVELOPMENT.md), [`docs/DEPLOYMENT.
 
 ## Limitations and safety
 
-SettleLink is testnet software, is not externally audited, and is not endorsed by Arc or Circle. Automatic crosschain refunds remain a recovery workflow rather than a universal atomic guarantee. Full public CCTP transaction evidence is still pending; current Arc-native funding evidence, once recorded, must not be interpreted as a crosschain checkout.
+SettleLink is testnet software, is not externally audited, and is not endorsed by Arc or Circle. Automatic crosschain refunds remain a recovery workflow rather than a universal atomic guarantee. Full public CCTP transaction evidence is still pending; the recorded Arc-native funding evidence proves vault settlement but must not be interpreted as a completed crosschain checkout.
 
 Read [`SECURITY.md`](SECURITY.md), [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md), and [`docs/BRAND_COMPLIANCE.md`](docs/BRAND_COMPLIANCE.md) before using or evaluating the code.

@@ -16,8 +16,8 @@ This record distinguishes deterministic automated coverage from real external-wa
 | Production dependency audit                            | High issues resolved          | `ws` is forced to patched `8.21.1`; one upstream Circle/ethers `elliptic` low advisory remains      |
 | Vercel contract configuration                          | Configured                    | Production/preview/development factory and registry variables use the verified Arc deployment       |
 | Public read-only proof mode                            | Passed in code                | Missing API disables backend routes; production preflight rejects a localhost API                   |
-| Stable production URL                                  | Pending final deployment      | Target: `https://arc-crosschain-checkout.vercel.app`                                                |
-| Anonymous deployed-browser check                       | Pending production retest     | Existing preview opened anonymously; stable production must be retested after deployment            |
+| Stable production URL                                  | Passed                        | `https://arc-crosschain-checkout.vercel.app`                                                        |
+| Anonymous deployed-browser check                       | Passed                        | Homepage, `/proof`, and dashboard checked on 2026-07-21; no console errors                          |
 | Real WalletConnect QR modal                            | Not tested                    | Requires a valid project ID and allowlisted deployed origin                                         |
 | Real mobile pairing                                    | Not tested                    | Requires a real QR session and mobile wallet approval                                               |
 | Real desktop extension                                 | Not tested                    | Automated tests use a mocked provider; Chrome profile was not used to approve a real wallet session |
