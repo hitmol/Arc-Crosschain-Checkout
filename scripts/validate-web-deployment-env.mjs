@@ -13,6 +13,10 @@ const missing = requiredPublicVariables.filter(
 
 if (process.env.VERCEL_ENV === "production") {
   const result = validateComponentEnv("web", process.env);
+  if (process.env.NEXT_PUBLIC_CCTP_ENABLED === "true") {
+    validateComponentEnv("api", process.env);
+    validateComponentEnv("worker", process.env);
+  }
   console.log(
     `SettleLink production web environment preflight passed in ${result.mode} mode.`,
   );

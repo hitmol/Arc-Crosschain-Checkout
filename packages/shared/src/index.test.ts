@@ -68,6 +68,11 @@ describe("payment attempt authorization", () => {
 });
 
 describe("order IDs", () => {
+  it("preserves an existing bytes32 order ID for legacy onchain invoices", () => {
+    const orderId = `0x${"ab".repeat(32)}`;
+    expect(orderIdToBytes32(orderId)).toBe(orderId);
+  });
+
   it("accepts up to 32 UTF-8 bytes", () => {
     expect(orderIdToBytes32("é".repeat(16))).toMatch(/^0x[a-f0-9]{64}$/);
   });

@@ -6,7 +6,7 @@ export type PublicCapabilities = {
   merchantAuthenticationEnabled: boolean;
   onchainInvoiceCreationEnabled: true;
   localInvoiceHistoryEnabled: true;
-  cctpPublicPaymentEnabled: false;
+  cctpPublicPaymentEnabled: boolean;
 };
 
 export function resolvePublicCapabilities(apiUrl: string | null): PublicCapabilities {
@@ -17,7 +17,7 @@ export function resolvePublicCapabilities(apiUrl: string | null): PublicCapabili
     merchantAuthenticationEnabled: backendEnabled,
     onchainInvoiceCreationEnabled: true,
     localInvoiceHistoryEnabled: true,
-    cctpPublicPaymentEnabled: false,
+    cctpPublicPaymentEnabled: backendEnabled,
   };
 }
 

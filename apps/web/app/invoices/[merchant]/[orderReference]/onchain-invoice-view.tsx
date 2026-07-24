@@ -17,6 +17,7 @@ import { orderIdToBytes32 } from "@arc-checkout/shared";
 import { checkoutFactoryAbi } from "@/lib/contracts";
 import { ARC_EXPLORER, arcDeployment } from "@/lib/deployment";
 import { readLocalInvoices, type LocalInvoice } from "@/lib/onchain-invoices";
+import { apiFetch, PUBLIC_READ_ONLY_MODE } from "@/lib/api";
 import {
   factoryAddress,
   readVaultSnapshot,
@@ -98,8 +99,9 @@ export function OnchainInvoiceView({
       if (loaded.orderId.toLowerCase() !== orderId.toLowerCase())
         throw new Error("Invoice vault order ID does not match this URL.");
       setSnapshot(loaded);
+      let resolvedTransaction: Hash | null = null;
       if (localRecord?.creationTransaction) {
-        setCreationTransaction(localRecord.creationTransaction as Hash);
+        resolvedTransaction = localRecord.creationTransaction as Hash;
       } else {
         const events = await publicClient.getContractEvents({
           address: factoryAddress,
@@ -109,7 +111,26 @@ export function OnchainInvoiceView({
           fromBlock: BigInt(arcDeployment.deploymentBlock),
           toBlock: "latest",
         });
-        setCreationTransaction(events.at(-1)?.transactionHash ?? null);
+        resolvedTransaction = events.at(-1)?.transactionHash ?? null;
+      }
+      setCreationTransaction(resolvedTransaction);
+      if (!PUBLIC_READ_ONLY_MODE && resolvedTransaction) {
+        const reconciled = await apiFetch<{ paymentUrl: string }>(
+          "/api/payment-intents/reconcile",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              merchantAddress,
+              orderId: orderReference,
+              amount: formatUnits(loaded.expectedAmount, 6),
+              expiresAt: new Date(
+                Number(loaded.expiresAt) * 1_000,
+              ).toISOString(),
+              transactionHash: resolvedTransaction,
+            }),
+          },
+        );
+        setPaymentUrl(reconciled.paymentUrl);
       }
     } catch (caught) {
       setError(
@@ -121,10 +142,6 @@ export function OnchainInvoiceView({
       setLoading(false);
     }
   }, [merchantAddress, orderReference, publicClient]);
-
-  useEffect(() => {
-    setPaymentUrl(window.location.href);
-  }, []);
 
   useEffect(() => {
     void refresh();
@@ -268,9 +285,9 @@ export function OnchainInvoiceView({
         </div>
       )}
       <div className="public-mode-notice">
-        This builder-preview invoice can be funded directly on Arc Testnet after
-        the payer registers an authorization. The public CCTP payment route is
-        still being validated; direct Arc funding is not CCTP evidence.
+        This invoice settles on Arc Testnet. Its payment link uses Circle CCTP
+        V2 and the Forwarding Service for native USDC from a supported source
+        testnet. Direct Arc funding is not CCTP evidence.
       </div>
     </div>
   );

@@ -18,6 +18,6 @@ describe("public application capabilities", () => {
     expect(capabilities.backendEnabled).toBe(true);
     expect(capabilities.merchantAuthenticationEnabled).toBe(true);
     expect(capabilities.onchainInvoiceCreationEnabled).toBe(true);
-    expect(capabilities.cctpPublicPaymentEnabled).toBe(false);
+    expect(capabilities.cctpPublicPaymentEnabled).toBe(true);
   });
 });

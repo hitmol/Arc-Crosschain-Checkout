@@ -249,14 +249,21 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
 
     async function refreshFromBackend() {
       try {
-        const remote = await apiFetch<AttemptSnapshot>(
-          `/api/payment-attempts/${savedAttemptId}`,
-        );
-        if (cancelled) return;
         const raw = localStorage.getItem(storageKey);
         const current = raw
           ? (JSON.parse(raw) as StoredPayment)
           : ({ step: 1 } satisfies StoredPayment);
+        const remote = await apiFetch<AttemptSnapshot>(
+          `/api/payment-attempts/${savedAttemptId}`,
+          current.clientSecret
+            ? {
+                headers: {
+                  "x-payment-attempt-secret": current.clientSecret,
+                },
+              }
+            : undefined,
+        );
+        if (cancelled) return;
         const step = Math.max(
           current.step,
           recoveryStep(remote.status, remote.paymentIntent.status),
@@ -779,7 +786,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
     setBusy(true);
     setError("");
     try {
-      const attempt = await apiFetch<{ id: string }>(
+      const attempt = await apiFetch<{ id: string; clientSecret: string }>(
         `/api/payment-intents/${invoice.id}/demo-attempts`,
         {
           method: "POST",
@@ -796,6 +803,7 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         refundAddress: address,
         sourceChainId,
         localDemo: true,
+        clientSecret: attempt.clientSecret,
       });
       const statusToStep: Record<string, number> = {
         QUOTED: 2,
@@ -808,7 +816,14 @@ export function PaymentCheckout({ invoiceSlug }: { invoiceSlug: string }) {
         SETTLED: 8,
       };
       const poll = window.setInterval(() => {
-        void apiFetch<{ status: string }>(`/api/payment-attempts/${attempt.id}`)
+        void apiFetch<{ status: string }>(
+          `/api/payment-attempts/${attempt.id}`,
+          {
+            headers: {
+              "x-payment-attempt-secret": attempt.clientSecret ?? "",
+            },
+          },
+        )
           .then((current) => {
             saveStep(statusToStep[current.status] ?? 2, { localDemo: true });
             if (current.status === "SETTLED" || current.status === "FAILED") {

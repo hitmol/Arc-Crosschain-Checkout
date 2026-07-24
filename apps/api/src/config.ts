@@ -20,6 +20,10 @@ const configSchema = z.object({
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/)
     .optional(),
+  ARC_MERCHANT_REGISTRY_ADDRESS: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/)
+    .optional(),
   WEBHOOK_ENCRYPTION_KEY: z.string().optional(),
   AUTH_DOMAIN: z.string().min(1).optional(),
   ALLOWED_WEBHOOK_HOSTS: z.string().default(""),

@@ -3,7 +3,14 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ["@arc-checkout/shared", "@arc-checkout/chain-config"],
+  transpilePackages: [
+    "@arc-checkout/api",
+    "@arc-checkout/worker",
+    "@arc-checkout/database",
+    "@arc-checkout/cctp",
+    "@arc-checkout/shared",
+    "@arc-checkout/chain-config",
+  ],
   async headers() {
     return [
       {

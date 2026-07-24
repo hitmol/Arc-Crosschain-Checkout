@@ -52,6 +52,9 @@ importers:
       '@arc-checkout/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@arc-checkout/worker':
+        specifier: workspace:*
+        version: link:../worker
       cors:
         specifier: ^2.8.5
         version: 2.8.6
@@ -98,6 +101,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@arc-checkout/api':
+        specifier: workspace:*
+        version: link:../api
       '@arc-checkout/chain-config':
         specifier: workspace:*
         version: link:../../packages/chain-config

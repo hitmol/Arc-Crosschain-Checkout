@@ -30,6 +30,7 @@ import {
 import { isAddressEqual, zeroAddress } from "viem";
 import { config } from "./config.js";
 import {
+  readRegisteredMerchant,
   ReconciliationError,
   verifyPaymentIntentTransaction,
 } from "./arc-reconciliation.js";
@@ -58,6 +59,7 @@ import {
   assertClientStatusTransition,
   verifyAttemptSecret,
 } from "./payment-attempt-access.js";
+import { reconcilePaymentAttempt } from "@arc-checkout/worker";
 import {
   assertSafeWebhookUrl,
   decryptSecret,
@@ -176,6 +178,7 @@ function demoVault(orderId: string): string {
 export function createApp(): Application {
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(
     cors({
@@ -741,7 +744,6 @@ export function createApp(): Application {
 
   app.post(
     "/api/payment-intents/reconcile",
-    merchantGuard("payment-intents:write"),
     asyncRoute(async (request, response) => {
       const input = paymentIntentInputSchema
         .omit({ vaultAddress: true, createTransactionHash: true })
@@ -749,16 +751,25 @@ export function createApp(): Application {
           transactionHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
         })
         .parse(request.body);
-      assertRequestedMerchant(response, input.merchantAddress);
-      const merchant = await prisma.merchant.findUnique({
+      const indexedMerchant = await prisma.merchant.findUnique({
         where: { walletAddress: input.merchantAddress.toLowerCase() },
       });
-      if (!merchant) {
-        response.status(409).json({
-          error: "Merchant registration has not been indexed yet",
-        });
-        return;
-      }
+      const onchainMerchant = await readRegisteredMerchant(
+        input.merchantAddress as `0x${string}`,
+      );
+      const merchant = await prisma.merchant.upsert({
+        where: { walletAddress: onchainMerchant.walletAddress },
+        update: {
+          payoutAddress: onchainMerchant.payoutAddress,
+          metadataHash: onchainMerchant.metadataHash,
+          active: true,
+        },
+        create: {
+          ...onchainMerchant,
+          displayName: indexedMerchant?.displayName ?? null,
+          active: true,
+        },
+      });
 
       const existing = await prisma.paymentIntent.findUnique({
         where: {
@@ -1056,9 +1067,12 @@ export function createApp(): Application {
         where: { paymentIntentId: intent.id, active: true },
       });
       if (existing) {
-        response.json(jsonSafe(existing));
+        response.status(409).json({
+          error: "An active demo payment attempt already exists",
+        });
         return;
       }
+      const clientSecret = createOpaqueToken(32);
       const attempt = await prisma.$transaction(async (transaction) => {
         const created = await transaction.paymentAttempt.create({
           data: {
@@ -1074,6 +1088,7 @@ export function createApp(): Application {
             maximumSourceAmount: intent.expectedAmount,
             status: "QUOTED",
             paymentIntentId: intent.id,
+            clientSecretHash: hashOpaqueSecret(clientSecret),
           },
         });
         await enqueuePaymentWebhook(transaction, {
@@ -1093,7 +1108,9 @@ export function createApp(): Application {
         });
         return created;
       });
-      response.status(201).json(jsonSafe(attempt));
+      const payload = jsonSafe(attempt);
+      delete payload.clientSecretHash;
+      response.status(201).json({ ...payload, clientSecret });
     }),
   );
 
@@ -1313,8 +1330,22 @@ export function createApp(): Application {
         response.status(404).json({ error: "Payment attempt not found" });
         return;
       }
+      if (
+        !verifyAttemptSecret(
+          request.header("x-payment-attempt-secret"),
+          attempt.clientSecretHash,
+        )
+      ) {
+        response.status(401).json({ error: "Invalid payment attempt secret" });
+        return;
+      }
+      await reconcilePaymentAttempt(attempt.id);
+      const reconciledAttempt = await prisma.paymentAttempt.findUnique({
+        where: { id: attempt.id },
+        include: { paymentIntent: true },
+      });
       response.setHeader("Cache-Control", "no-store");
-      const payload = jsonSafe(attempt);
+      const payload = jsonSafe(reconciledAttempt ?? attempt);
       delete payload.clientSecretHash;
       delete payload.signature;
       delete payload.authorizationDigest;

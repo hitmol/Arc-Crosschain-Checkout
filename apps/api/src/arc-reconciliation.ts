@@ -8,6 +8,7 @@ import {
   keccak256,
   parseAbi,
   toBytes,
+  zeroAddress,
   zeroHash,
   type Address,
   type Hex,
@@ -19,8 +20,8 @@ export const paymentIntentCreatedAbi = parseAbi([
   "event PaymentIntentCreated(bytes32 indexed orderId,address indexed merchant,address indexed vault,address payoutAddress,uint256 expectedAmount,uint16 protocolFeeBps,uint64 expiresAt,bytes32 metadataHash)",
 ]);
 
-const checkoutFactoryReadAbi = parseAbi([
-  "function predictPaymentVault(address merchant,bytes32 orderId) view returns (address)",
+const merchantRegistryReadAbi = parseAbi([
+  "function merchantOf(address merchant) view returns ((address owner,address payoutAddress,bytes32 metadataHash,bool active,uint64 createdAt))",
 ]);
 
 const arcClient = createPublicClient({
@@ -43,6 +44,29 @@ export type ReconcileIntentInput = {
   expiresAt: string;
   description?: string;
 };
+
+export async function readRegisteredMerchant(merchantAddress: Address) {
+  if (!config.ARC_MERCHANT_REGISTRY_ADDRESS)
+    throw new Error("Merchant registry address is not configured");
+  const merchant = await arcClient.readContract({
+    address: getAddress(config.ARC_MERCHANT_REGISTRY_ADDRESS),
+    abi: merchantRegistryReadAbi,
+    functionName: "merchantOf",
+    args: [merchantAddress],
+  });
+  if (
+    merchant.owner === zeroAddress ||
+    !isAddressEqual(merchant.owner, merchantAddress)
+  )
+    throw new ReconciliationError("Merchant is not registered on Arc");
+  if (!merchant.active)
+    throw new ReconciliationError("Merchant is inactive on Arc");
+  return {
+    walletAddress: getAddress(merchant.owner).toLowerCase(),
+    payoutAddress: getAddress(merchant.payoutAddress).toLowerCase(),
+    metadataHash: merchant.metadataHash.toLowerCase(),
+  };
+}
 
 export async function verifyPaymentIntentTransaction(
   input: ReconcileIntentInput,
@@ -110,21 +134,12 @@ export async function verifyPaymentIntentTransaction(
       throw new ReconciliationError(
         "Factory event payout does not match indexed merchant",
       );
-    if (args.metadataHash.toLowerCase() !== expectedMetadataHash.toLowerCase())
+    if (
+      input.description !== undefined &&
+      args.metadataHash.toLowerCase() !== expectedMetadataHash.toLowerCase()
+    )
       throw new ReconciliationError(
         "Factory event metadata does not match request",
-      );
-
-    const predictedVault = await arcClient.readContract({
-      address: factory,
-      abi: checkoutFactoryReadAbi,
-      functionName: "predictPaymentVault",
-      args: [input.merchantAddress, args.orderId],
-      blockNumber: receipt.blockNumber,
-    });
-    if (!isAddressEqual(predictedVault, args.vault))
-      throw new ReconciliationError(
-        "Factory event vault is not the deterministic vault",
       );
 
     return {

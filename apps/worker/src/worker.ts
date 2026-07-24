@@ -145,9 +145,10 @@ function decryptSecret(value: string): string {
   ]).toString("utf8");
 }
 
-async function reconcileCctpAttempts() {
+async function reconcileCctpAttempts(attemptId?: string) {
   const attempts = await prisma.paymentAttempt.findMany({
     where: {
+      ...(attemptId ? { id: attemptId } : {}),
       sourceTransactionHash: { not: null },
       status: {
         in: ["BURN_SUBMITTED", "SOURCE_CONFIRMED", "ATTESTING", "RECOVERABLE"],
@@ -365,9 +366,10 @@ async function reconcileCctpAttempts() {
   }
 }
 
-async function reconcileVaults() {
+async function reconcileVaults(paymentIntentId?: string) {
   const intents = await prisma.paymentIntent.findMany({
     where: {
+      ...(paymentIntentId ? { id: paymentIntentId } : {}),
       vaultAddress: { not: null },
       status: { in: ["OPEN", "PARTIALLY_FUNDED", "FUNDED", "SETTLING"] },
     },
@@ -720,6 +722,19 @@ async function tick() {
   await processWebhookQueue(deliverWebhook);
 }
 
+export async function reconcilePaymentAttempt(
+  attemptId: string,
+): Promise<void> {
+  const attempt = await prisma.paymentAttempt.findUnique({
+    where: { id: attemptId },
+    select: { paymentIntentId: true },
+  });
+  if (!attempt) return;
+  await reconcileCctpAttempts(attemptId);
+  await reconcileVaults(attempt.paymentIntentId);
+  await processWebhookQueue(deliverWebhook);
+}
+
 const workerState: {
   startedAt: string;
   lastTickStartedAt: string | null;
@@ -756,95 +771,100 @@ async function safeTick(): Promise<void> {
   }
 }
 
-const healthServer = createServer((_request, response) => {
-  void (async () => {
-    const [database, rpc, circle, cursor] = await Promise.all([
-      prisma.$queryRaw`SELECT 1`.then(
-        () => true,
-        () => false,
-      ),
-      publicClient.getBlockNumber().then(
-        () => true,
-        () => false,
-      ),
-      fetch(`${env.CIRCLE_API_BASE_URL}/v2/burn/USDC/fees/6/26?forward=true`, {
-        signal: AbortSignal.timeout(10_000),
-      }).then(
-        (result) => result.ok,
-        () => false,
-      ),
-      prisma.indexerCursor.findUnique({
-        where: {
-          chainId_stream: {
-            chainId: arcTestnet.id,
-            stream: "arc-events",
+export function startWorker(): void {
+  const healthServer = createServer((_request, response) => {
+    void (async () => {
+      const [database, rpc, circle, cursor] = await Promise.all([
+        prisma.$queryRaw`SELECT 1`.then(
+          () => true,
+          () => false,
+        ),
+        publicClient.getBlockNumber().then(
+          () => true,
+          () => false,
+        ),
+        fetch(
+          `${env.CIRCLE_API_BASE_URL}/v2/burn/USDC/fees/6/26?forward=true`,
+          {
+            signal: AbortSignal.timeout(10_000),
           },
-        },
-      }),
-    ]);
-    const indexerLag =
-      cursor?.finalizedBlock === null || cursor?.finalizedBlock === undefined
-        ? null
-        : cursor.finalizedBlock > cursor.blockNumber
-          ? cursor.finalizedBlock - cursor.blockNumber
-          : 0n;
-    const healthy = database && rpc && circle && !workerState.lastTickError;
-    response.writeHead(healthy ? 200 : 503, {
-      "content-type": "application/json",
-      "cache-control": "no-store",
+        ).then(
+          (result) => result.ok,
+          () => false,
+        ),
+        prisma.indexerCursor.findUnique({
+          where: {
+            chainId_stream: {
+              chainId: arcTestnet.id,
+              stream: "arc-events",
+            },
+          },
+        }),
+      ]);
+      const indexerLag =
+        cursor?.finalizedBlock === null || cursor?.finalizedBlock === undefined
+          ? null
+          : cursor.finalizedBlock > cursor.blockNumber
+            ? cursor.finalizedBlock - cursor.blockNumber
+            : 0n;
+      const healthy = database && rpc && circle && !workerState.lastTickError;
+      response.writeHead(healthy ? 200 : 503, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      });
+      response.end(
+        JSON.stringify({
+          status: healthy ? "ok" : "degraded",
+          database,
+          arcRpc: rpc,
+          circleApi: circle,
+          indexer: {
+            configured: Boolean(
+              env.ARC_MERCHANT_REGISTRY_ADDRESS &&
+              env.ARC_CHECKOUT_FACTORY_ADDRESS &&
+              env.ARC_DEPLOYMENT_BLOCK !== undefined,
+            ),
+            processedBlock: cursor?.blockNumber.toString() ?? null,
+            finalizedBlock: cursor?.finalizedBlock?.toString() ?? null,
+            headBlock: cursor?.headBlock?.toString() ?? null,
+            lag: indexerLag?.toString() ?? null,
+            lastSuccessAt: cursor?.lastSuccessAt?.toISOString() ?? null,
+            lastError: cursor?.lastError ?? workerState.indexerError,
+          },
+          worker: workerState,
+        }),
+      );
+    })().catch((error) => {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          status: "error",
+          error: error instanceof Error ? error.message : "unknown",
+        }),
+      );
     });
-    response.end(
-      JSON.stringify({
-        status: healthy ? "ok" : "degraded",
-        database,
-        arcRpc: rpc,
-        circleApi: circle,
-        indexer: {
-          configured: Boolean(
-            env.ARC_MERCHANT_REGISTRY_ADDRESS &&
-            env.ARC_CHECKOUT_FACTORY_ADDRESS &&
-            env.ARC_DEPLOYMENT_BLOCK !== undefined,
-          ),
-          processedBlock: cursor?.blockNumber.toString() ?? null,
-          finalizedBlock: cursor?.finalizedBlock?.toString() ?? null,
-          headBlock: cursor?.headBlock?.toString() ?? null,
-          lag: indexerLag?.toString() ?? null,
-          lastSuccessAt: cursor?.lastSuccessAt?.toISOString() ?? null,
-          lastError: cursor?.lastError ?? workerState.indexerError,
-        },
-        worker: workerState,
-      }),
-    );
-  })().catch((error) => {
-    response.writeHead(503, { "content-type": "application/json" });
-    response.end(
-      JSON.stringify({
-        status: "error",
-        error: error instanceof Error ? error.message : "unknown",
-      }),
-    );
   });
-});
-healthServer.listen(env.WORKER_PORT);
+  healthServer.listen(env.WORKER_PORT);
 
-logger.info(
-  {
-    mode: env.DEMO_MODE ? "demo" : "testnet",
-    automatedSettlement: Boolean(walletClient),
-    arcIndexer: Boolean(
-      env.ARC_MERCHANT_REGISTRY_ADDRESS &&
-      env.ARC_CHECKOUT_FACTORY_ADDRESS &&
-      env.ARC_DEPLOYMENT_BLOCK !== undefined,
-    ),
-  },
-  "settlement worker started",
-);
-void safeTick();
-const timer = setInterval(() => void safeTick(), env.WORKER_POLL_INTERVAL_MS);
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    clearInterval(timer);
-    healthServer.close();
-    void prisma.$disconnect().finally(() => process.exit(0));
-  });
+  logger.info(
+    {
+      mode: env.DEMO_MODE ? "demo" : "testnet",
+      automatedSettlement: Boolean(walletClient),
+      arcIndexer: Boolean(
+        env.ARC_MERCHANT_REGISTRY_ADDRESS &&
+        env.ARC_CHECKOUT_FACTORY_ADDRESS &&
+        env.ARC_DEPLOYMENT_BLOCK !== undefined,
+      ),
+    },
+    "settlement worker started",
+  );
+  void safeTick();
+  const timer = setInterval(() => void safeTick(), env.WORKER_POLL_INTERVAL_MS);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      clearInterval(timer);
+      healthServer.close();
+      void prisma.$disconnect().finally(() => process.exit(0));
+    });
+  }
 }

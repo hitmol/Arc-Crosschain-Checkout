@@ -1,10 +1,12 @@
 const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+const sameOriginApiEnabled =
+  process.env.NEXT_PUBLIC_CCTP_ENABLED?.trim() === "true";
 
-export const API_URL = configuredApiUrl || null;
-export const PUBLIC_READ_ONLY_MODE = !API_URL;
+export const API_URL = configuredApiUrl || (sameOriginApiEnabled ? "" : null);
+export const PUBLIC_READ_ONLY_MODE = API_URL === null;
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  if (!API_URL) {
+  if (API_URL === null) {
     throw new Error(
       "The merchant backend is not enabled on this public builder preview. Verified contract and transaction evidence remain available on the Proof of Build page.",
     );

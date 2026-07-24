@@ -98,10 +98,15 @@ export function validateComponentEnv(component, env) {
     const api = optionalUrl(env, "NEXT_PUBLIC_API_URL", {
       protocols: ["https:"],
     });
+    const sameOriginApi = env.NEXT_PUBLIC_CCTP_ENABLED === "true";
     validatePublicAddresses(env);
     if (env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim())
       walletConnectProjectId(env);
-    return { component, valid: true, mode: api ? "connected" : "read-only" };
+    return {
+      component,
+      valid: true,
+      mode: api || sameOriginApi ? "connected" : "read-only",
+    };
   }
 
   if (component === "api") {

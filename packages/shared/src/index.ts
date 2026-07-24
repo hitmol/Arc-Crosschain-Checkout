@@ -26,7 +26,9 @@ export const orderIdSchema = z
   .min(1)
   .max(80)
   .refine(
-    (value) => new TextEncoder().encode(value).length <= 32,
+    (value) =>
+      /^0x[a-fA-F0-9]{64}$/.test(value) ||
+      new TextEncoder().encode(value).length <= 32,
     "Order ID is longer than 32 UTF-8 bytes",
   );
 
@@ -149,6 +151,8 @@ export function formatUsdc(value: bigint): string {
 }
 
 export function orderIdToBytes32(orderId: string): `0x${string}` {
+  if (/^0x[a-fA-F0-9]{64}$/.test(orderId))
+    return orderId.toLowerCase() as `0x${string}`;
   const bytes = new TextEncoder().encode(orderId);
   if (bytes.length > 32)
     throw new Error("Order ID is longer than 32 UTF-8 bytes");

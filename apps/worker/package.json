@@ -3,10 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/worker.js",
+  "types": "./dist/worker.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/worker.ts",
-    "start": "node dist/worker.js",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
